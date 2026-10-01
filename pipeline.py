@@ -45,7 +45,7 @@ def load_env():
 
 def stockfish_path(cfg):
     p = cfg.get("STOCKFISH_PATH") or os.path.join(ROOT, "engine", "stockfish")
-    if not os.path.exists(p):
+    if not os.path.isfile(p):
         sys.exit(f"스톡피시 바이너리가 없습니다: {p}  (setup.sh 를 먼저 실행하세요)")
     return p
 
