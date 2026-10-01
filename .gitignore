@@ -1,0 +1,7 @@
+.env
+venv/
+engine/
+__pycache__/
+data/*.json
+data/pipeline.lock
+*.log
