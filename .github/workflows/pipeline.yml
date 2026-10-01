@@ -41,17 +41,22 @@ jobs:
         uses: actions/cache@v4
         with:
           path: engine
-          key: stockfish-${{ env.STOCKFISH_TAG }}-linux-x86-64
+          key: stockfish-${{ env.STOCKFISH_TAG }}-linux-x86-64-v2
 
       - name: Stockfish 내려받기
         if: steps.sf.outputs.cache-hit != 'true'
         run: |
-          mkdir -p engine
-          curl -sL -o engine/sf.tgz "https://github.com/official-stockfish/Stockfish/releases/download/${STOCKFISH_TAG}/stockfish-linux-x86-64-universal.tar.gz"
-          tar xzf engine/sf.tgz -C engine
-          bin=$(find engine -type f -name 'stockfish-*' ! -name '*.tgz' | head -1)
-          mv "$bin" engine/stockfish && chmod +x engine/stockfish && rm -rf engine/sf.tgz engine/stockfish-*/
-          (echo uci; echo quit) | ./engine/stockfish | head -1
+          set -euo pipefail
+          rm -rf engine /tmp/sf && mkdir -p engine /tmp/sf
+          curl -fsSL -o /tmp/sf/sf.tgz "https://github.com/official-stockfish/Stockfish/releases/download/${STOCKFISH_TAG}/stockfish-linux-x86-64-universal.tar.gz"
+          tar xzf /tmp/sf/sf.tgz -C /tmp/sf
+          bin=$(find /tmp/sf -type f -name 'stockfish-*' ! -name '*.tgz' | head -1)
+          test -n "$bin"
+          mv "$bin" engine/stockfish && chmod +x engine/stockfish
+          test -f engine/stockfish
+
+      - name: Stockfish 동작 확인
+        run: (echo uci; echo quit) | ./engine/stockfish | grep -m1 '^id name'
 
       - name: 파이프라인 실행
         env:
