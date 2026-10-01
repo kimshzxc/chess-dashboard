@@ -1,0 +1,73 @@
+# 10분마다 체스닷컴 게임 수집 → 스톡피시 분석 → 대시보드 생성 → ntfy 알림 → docs/ 와 data/chess.db 커밋
+name: chess pipeline
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+    inputs:
+      render_only:
+        description: "새 게임 수집 없이 대시보드만 다시 생성"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+# 이전 실행이 끝나기 전에 다음 실행이 겹치지 않도록
+concurrency:
+  group: chess-pipeline
+  cancel-in-progress: false
+
+env:
+  STOCKFISH_TAG: sf_19
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Stockfish 캐시
+        id: sf
+        uses: actions/cache@v4
+        with:
+          path: engine
+          key: stockfish-${{ env.STOCKFISH_TAG }}-linux-x86-64
+
+      - name: Stockfish 내려받기
+        if: steps.sf.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p engine
+          curl -sL -o engine/sf.tgz "https://github.com/official-stockfish/Stockfish/releases/download/${STOCKFISH_TAG}/stockfish-linux-x86-64-universal.tar.gz"
+          tar xzf engine/sf.tgz -C engine
+          bin=$(find engine -type f -name 'stockfish-*' ! -name '*.tgz' | head -1)
+          mv "$bin" engine/stockfish && chmod +x engine/stockfish && rm -rf engine/sf.tgz engine/stockfish-*/
+          (echo uci; echo quit) | ./engine/stockfish | head -1
+
+      - name: 파이프라인 실행
+        env:
+          CHESSCOM_USERNAME: ${{ secrets.CHESSCOM_USERNAME }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+          GITHUB_OWNER: ${{ github.repository_owner }}
+          GITHUB_REPO: ${{ github.event.repository.name }}
+          STOCKFISH_PATH: ${{ github.workspace }}/engine/stockfish
+        run: python pipeline.py --no-push ${{ inputs.render_only && '--render-only' || '' }}
+
+      - name: 결과 커밋
+        run: |
+          git config user.name "chess-pipeline"
+          git config user.email "actions@users.noreply.github.com"
+          git add data/chess.db docs
+          if git diff --cached --quiet; then echo "변경 없음"; exit 0; fi
+          git commit -m "update $(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M')"
+          git pull --rebase origin main
+          git push origin HEAD:main
