@@ -93,8 +93,18 @@ def http_json(url, cfg, headers=None):
 OUTCOME_DRAW = {"agreed", "insufficient", "stalemate", "repetition", "timevsinsufficient", "50move"}
 
 
-def fetch_new_games(con, cfg):
+def fetch_new_games(con, cfg, quick=False):
+    """새 래피드 게임을 DB 에 넣고 url 목록을 돌려준다.
+    quick=True 면 1KB 짜리 플레이어 통계로 마지막 래피드 게임 시각만 먼저 보고, DB 보다 새로울 때만 월간 기보를 받는다 (1분 간격 감시용)."""
     me = cfg["CHESSCOM_USERNAME"].lower()
+    if quick:
+        last_known = con.execute("SELECT MAX(end_time) FROM games").fetchone()[0]
+        try:
+            last_ts = http_json(f"https://api.chess.com/pub/player/{me}/stats", cfg).get("chess_rapid", {}).get("last", {}).get("date")
+        except Exception:
+            last_ts = None
+        if last_known and last_ts and last_ts <= last_known:
+            return []
     archives = http_json(f"https://api.chess.com/pub/player/{me}/games/archives", cfg)["archives"]
     known = {r[0] for r in con.execute("SELECT url FROM games")}
     new = []
@@ -1143,6 +1153,7 @@ def main():
     ap.add_argument("--no-notify", action="store_true")
     ap.add_argument("--render-only", action="store_true")
     ap.add_argument("--test-notify", action="store_true", help="가장 최근 게임 알림을 보내 본다")
+    ap.add_argument("--quick", action="store_true", help="통계 API 로 새 게임 유무만 먼저 확인 (1분 간격 감시용). 할 일이 없으면 조용히 끝난다")
     a = ap.parse_args()
     cfg = load_env()
     if not cfg.get("CHESSCOM_USERNAME"):
@@ -1164,7 +1175,7 @@ def main():
     new_done = []
     if not a.render_only:
         try:
-            new = fetch_new_games(con, cfg)
+            new = fetch_new_games(con, cfg, quick=a.quick)
         except Exception as e:
             log(f"체스닷컴 수집 실패: {e}")
             new = []
@@ -1176,7 +1187,8 @@ def main():
     code_changed = os.path.exists(index) and _read_code_hash() != code_hash()
     if code_changed:
         log("코드가 바뀌어 대시보드를 다시 만듭니다")
-    if new_done or a.render_only or code_changed or not os.path.exists(index):
+    rendered = bool(new_done or a.render_only or code_changed or not os.path.exists(index))
+    if rendered:
         try:
             enrich_lines(con, cfg)
         except Exception as e:
@@ -1206,7 +1218,8 @@ def main():
             notify(cfg, g, json.loads(g["summary"]), dashboard_url(cfg))
     con.execute("UPDATE games SET notified=1 WHERE analyzed=1 AND notified=0")
     con.commit()
-    log("완료")
+    if not (a.quick and not new_done and not rendered and not pending_notify):
+        log("완료")
 
 
 if __name__ == "__main__":
