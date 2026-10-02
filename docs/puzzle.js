@@ -1,7 +1,7 @@
 /* 오늘의 퍼즐: 내가 실제로 틀린 국면에서 최선 수 찾기. shared.js 다음에 module 로 로드된다. */
 document.body.insertAdjacentHTML('afterbegin', await fetch('pieces.svg').then(r=>r.text()));
 const ALL = await fetch('puzzles.json',{cache:'no-cache'}).then(r=>r.json());
-$('#tpanel-slot').innerHTML=themePanel();
+$('#tpanel-slot').innerHTML=themePanel(); applyMode();
 
 const TODAY=new Date(Date.now()+9*3600*1000).toISOString().slice(0,10);   // KST 날짜
 const DAILY=10;
@@ -13,6 +13,19 @@ let ST={idx:0,res:[]};
 try{ const s=JSON.parse(localStorage.getItem(KEY)||'null'); if(s&&s.res) ST=s; }catch(e){}
 const save=()=>{ try{localStorage.setItem(KEY,JSON.stringify(ST))}catch(e){} };
 
+/* 날짜별 기록 → 연속 일수와 최근 7일 */
+let HIST={}; try{ HIST=JSON.parse(localStorage.getItem('puzzle-history')||'{}')||{}; }catch(e){}
+function record(ok){ const h=HIST[TODAY]||{ok:0,n:0}; h.n++; if(ok) h.ok++; HIST[TODAY]=h; try{localStorage.setItem('puzzle-history',JSON.stringify(HIST))}catch(e){} }
+const dkey=(off)=>new Date(Date.now()+9*3600*1000-off*864e5).toISOString().slice(0,10);
+function streakCard(){
+  let n=0, off=HIST[dkey(0)]?0:1; while(HIST[dkey(off)]){ n++; off++; }
+  const tot=Object.values(HIST).reduce((a,h)=>[a[0]+h.ok,a[1]+h.n],[0,0]);
+  const mx=Math.max(1,...Array.from({length:7},(_,i)=>(HIST[dkey(i)]||{}).n||0));
+  const days='일월화수목금토';
+  const week=Array.from({length:7},(_,i)=>{ const k=dkey(6-i), h=HIST[k]; const d=days[new Date(k+'T00:00:00Z').getUTCDay()];
+    return `<div><i class="${h?'has':''}" style="height:${h?Math.max(8,Math.round(h.n/mx*36)):4}px" title="${k}"></i>${d}</div>`; }).join('');
+  return `<div class="card streakcard"><div><div class="sub">연속 풀이</div><div class="n">${n}<small>일</small></div><div class="sub">누적 정답 ${tot[0]} / ${tot[1]}${tot[1]?` (${Math.round(tot[0]/tot[1]*100)}%)`:''}</div></div><div class="week">${week}</div></div>`;
+}
 let SEL=null, ANSWERED=false;
 const cur=()=>ORDER[ST.idx];
 const colorName=c=>c==='w'?'백':'흑';
@@ -21,7 +34,7 @@ function render(){
   const total=Math.min(DAILY,ORDER.length);
   if(!ORDER.length){ $('#main').innerHTML='<div class="empty">퍼즐이 아직 없습니다.</div>'; return; }
   const w=cur(); const inDaily=ST.idx<total;
-  let h=`<div class="prog"><div><b>${inDaily?'오늘의 퍼즐':'추가 퍼즐'}</b> <span class="sub">${inDaily?`${ST.idx+1} / ${total}`:`${ST.idx+1}번째 · 오늘 정답 ${ST.res.filter(x=>x==='ok').length}/${ST.res.length}`}</span></div>`;
+  let h=streakCard()+`<div class="prog"><div><b>${inDaily?'오늘의 퍼즐':'추가 퍼즐'}</b> <span class="sub">${inDaily?`${ST.idx+1} / ${total}`:`${ST.idx+1}번째 · 오늘 정답 ${ST.res.filter(x=>x==='ok').length}/${ST.res.length}`}</span></div>`;
   if(inDaily) h+=`<div class="dots">${Array.from({length:total},(_,i)=>`<i class="${ST.res[i]||''} ${i===ST.idx?'cur':''}"></i>`).join('')}</div>`;
   h+=`</div>`;
   if(!w){ h+=summary(); $('#main').innerHTML=h; return; }
@@ -51,7 +64,8 @@ function mine(sq){ const w=cur(); const p=parseFen(w.fen).find(x=>x.sq===sq); re
 function answer(uci){
   const w=cur(); ANSWERED=true;
   const ok=uci.slice(0,4)===(w.best_uci||'').slice(0,4);
-  ST.res[ST.idx]=ok?'ok':'ng'; save();
+  ST.res[ST.idx]=ok?'ok':'ng'; save(); record(ok);
+  $('#pzboard').classList.add(ok?'ok':'ng');
   const gave=uci==='----';
   drawBoard({arrows:[...(gave?[]:[[uci,ok?GREEN:RED]]),...(ok?[]:[[w.best_uci,GREEN]])]});
   if(gave) ST.res[ST.idx]='ng';

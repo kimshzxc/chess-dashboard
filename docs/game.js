@@ -1,6 +1,7 @@
 /* 게임 상세 페이지. shared.js 다음에 module 로 로드된다. */
 document.body.insertAdjacentHTML('afterbegin', await fetch('pieces.svg').then(r=>r.text()));
-$('#tpanel-slot').innerHTML=themePanel();
+$('#tpanel-slot').innerHTML=themePanel(); applyMode();
+$('#backbtn').innerHTML=icon('back')+'게임 목록';
 const params=new URLSearchParams(location.search);
 const ID=params.get('id'); let G=null, IDX=0, FLIP=false, SHOW_BEST=true;
 const CLS={best:['최선','best'],good:['좋음','good'],inacc:['부정확','inacc'],mist:['실수','mist'],blun:['대실수','blun'],miss:['외통 놓침','blun']};
@@ -15,14 +16,15 @@ async function load(){
   renderHead(); renderMain(); draw();
 }
 function renderHead(){
-  $('#head').innerHTML=`<div class="players"><span><b>${esc(G.white)}</b> (${G.welo}) <span class="sub">백</span></span><span class="res ${G.outcome}" style="width:auto;padding:0 12px;height:32px;font-size:14px">${G.result} · ${G.outcome==='W'?'승':G.outcome==='L'?'패':'무'}</span><span><span class="sub">흑</span> <b>${esc(G.black)}</b> (${G.belo})</span></div>
+  $('#head').innerHTML=`<div class="players"><span><b>${esc(G.white)}</b><span class="sub">백 · ${G.welo}</span></span><span class="res ${G.outcome}">${G.result} · ${G.outcome==='W'?'승':G.outcome==='L'?'패':'무'}</span><span><b>${esc(G.black)}</b><span class="sub">흑 · ${G.belo}</span></span></div>
   <div class="sub" style="margin-top:6px">${G.date} · ${esc(G.termination||'')} · <a href="${esc(G.url)}" target="_blank" rel="noopener">체스닷컴 ↗</a></div>
   <div class="sub" style="color:var(--muted)">${esc(G.eco_name)}</div>`;
 }
 function renderMain(){
   const s=G.summary, n=G.plies.length;
-  let h=`<div class="boardwrap"><div class="evalbar" id="evalbar"><div class="w"></div><span></span></div><div id="board" style="flex:1;min-width:0"></div></div>`;
-  h+=`<div class="vctl"><span class="btn nav" data-go="0">⏮</span><span class="btn nav" data-go="-1">‹</span><span class="btn nav" data-go="1">›</span><span class="btn nav" data-go="9">⏭</span></div>`;
+  let h=`<div class="stick"><div class="boardwrap"><div class="evalbar" id="evalbar"><div class="w"></div><span></span></div><div id="board" style="flex:1;min-width:0"></div></div>`;
+  h+=`<div class="strip" id="strip">`+G.plies.map((p,i)=>`${p.mover==='w'?`<span class="num">${p.move}.</span>`:''}<span class="mv" data-jump="${i+1}"><i style="background:${CLSCOLOR[p.cls]}"></i>${esc(p.san)}</span>`).join('')+`</div>`;
+  h+=`<div class="vctl"><span class="btn nav" data-go="0">⏮</span><span class="btn nav" data-go="-1">‹</span><span class="btn nav" data-go="1">›</span><span class="btn nav" data-go="9">⏭</span></div></div>`;
   h+=`<div class="opts"><span class="btn ${SHOW_BEST?'on':''}" id="optbest">정답 화살표</span><span class="btn" id="optflip">판 뒤집기</span></div>`;
   h+=`<div class="info card" id="info"></div>`;
   h+=`<div class="card"><div class="sub">평가 그래프 (누르면 이동 · 점: 실수/대실수)</div>${graphSVG()}</div>`;
@@ -81,7 +83,8 @@ function draw(){
     if(L&&L.refutation&&L.refutation.length) info+=`<div class="sub">내 수 뒤 반격: <span class="mono">${esc(L.refutation.map(s=>s.san).join(' '))}</span></div>`;
   }
   $('#info').innerHTML=info;
-  document.querySelectorAll('.mlist .mv').forEach(el=>el.classList.toggle('cur',+el.dataset.jump===IDX));
+  document.querySelectorAll('.mv[data-jump]').forEach(el=>el.classList.toggle('cur',+el.dataset.jump===IDX));
+  { const st=$('#strip'), c=st&&st.querySelector('.mv.cur'); if(st) st.scrollTo({left:c?c.offsetLeft-st.offsetLeft-st.clientWidth/2+c.clientWidth/2:0,behavior:'smooth'}); }
   const g=$('#gcur'); if(g){ g.setAttribute('x1',(IDX/n*360).toFixed(1)); g.setAttribute('x2',(IDX/n*360).toFixed(1)); }
   applyTheme();
 }

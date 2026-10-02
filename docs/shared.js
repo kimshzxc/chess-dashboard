@@ -7,7 +7,7 @@ const mv = (w)=> `${w.move}.${w.mover==='w'?'':'..'}${w.san}`;
 const pct=(v)=> v==null?'-':v+'%';
 const PH={opening:'오프닝',middlegame:'중반',endgame:'엔드게임'};
 const gameId=(url)=> (url||'').split('/').pop();
-const RED='#d03b3b', GREEN='#0ca30c', BLUE='#2a78d6', GRAY='#8a8883';
+const RED='#e5484d', GREEN='#2fb564', BLUE='#3b82f6', GRAY='#8a8883';
 
 /* ---------- 테마 (체스닷컴 판 색상 프리셋 + 기물 세트) ---------- */
 const GRAIN=true;
@@ -33,10 +33,37 @@ function applyTheme(){
   document.querySelectorAll('svg.board use').forEach(u=>{ const id=u.getAttribute('href').split('-').pop(); u.setAttribute('href',`#${THEME.pieces}-${id}`); });
   document.querySelectorAll('.sw[data-board]').forEach(x=>x.classList.toggle('on',x.dataset.board===THEME.board));
   document.querySelectorAll('.sw[data-pieces]').forEach(x=>x.classList.toggle('on',x.dataset.pieces===THEME.pieces));
+  document.querySelectorAll('.sw[data-mode]').forEach(x=>x.classList.toggle('on',x.dataset.mode===MODE));
   try{localStorage.setItem('chess-theme',JSON.stringify(THEME))}catch(e){}
 }
+/* 화면 모드: 기본 짙은 톤. 'light' 를 고르면 밝은 톤 */
+let MODE='dark'; try{ MODE=localStorage.getItem('chess-mode')||'dark'; }catch(e){}
+function applyMode(){
+  if(MODE==='light') document.documentElement.dataset.mode='light'; else delete document.documentElement.dataset.mode;
+  const m=document.querySelector('meta[name="theme-color"]'); if(m) m.content=MODE==='light'?'#f4f5f7':'#0e1014';
+  document.querySelectorAll('.sw[data-mode]').forEach(x=>x.classList.toggle('on',x.dataset.mode===MODE));
+  try{localStorage.setItem('chess-mode',MODE)}catch(e){}
+}
+const ICON={
+  home:'<path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
+  games:'<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+  mistakes:'<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0zM12 9v4M12 17h.01"/>',
+  puzzle:'<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/>',
+  stats:'<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+  sliders:'<path d="M4 6h8M16 6h4M4 12h2M10 12h10M4 18h10M18 18h2"/><circle cx="14" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="16" cy="18" r="2"/>',
+  back:'<path d="M15 5l-7 7 7 7"/>',
+};
+const icon=(n)=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${ICON[n]}</svg>`;
+/* 하단 탭바 (세 페이지 공용). body[data-tab] 이 현재 탭 */
+function tabbar(){
+  const cur=document.body.dataset.tab||'';
+  const items=[['home','홈','index.html#home'],['games','게임','index.html#games'],['mistakes','복기','index.html#mistakes'],['puzzle','퍼즐','puzzle.html'],['stats','통계','index.html#stats']];
+  return `<nav class="tabbar" id="tabbar">`+items.map(([k,n,u])=>`<a href="${u}" data-tab="${k}" class="${k===cur?'on':''}">${icon(k)}${n}</a>`).join('')+`</nav>`;
+}
+document.body.insertAdjacentHTML('beforeend',tabbar());
+{ const tb=document.getElementById('tbtn'); if(tb) tb.innerHTML=icon('sliders')+'테마'; }
 function themePanel(){
-  let h=`<div class="tpanel" id="tpanel"><div class="lab">판 색상</div><div class="row">`;
+  let h=`<div class="tpanel" id="tpanel"><div class="lab">화면</div><div class="row"><span class="sw mode" data-mode="dark">짙게</span><span class="sw mode" data-mode="light">밝게</span></div><div class="lab">판 색상</div><div class="row">`;
   for(const [k,b] of Object.entries(BOARDS)) h+=`<span class="sw" data-board="${k}"><i><b style="background:${b.l}"></b><b style="background:${b.d}"></b><b style="background:${b.d}"></b><b style="background:${b.l}"></b></i>${b.name}</span>`;
   h+=`</div><div class="lab">기물</div><div class="row">`;
   for(const [k,n] of Object.entries(PSETS)) h+=`<span class="sw" data-pieces="${k}"><svg viewBox="0 0 100 100"><use href="#${k}-wN" width="100" height="100"/></svg>${n}</span>`;
@@ -45,6 +72,7 @@ function themePanel(){
 document.addEventListener('click',(e)=>{
   const tb=e.target.closest('#tbtn'); if(tb){ $('#tpanel').classList.toggle('open'); return; }
   const t=e.target.closest('.sw'); if(!t) return;
+  if(t.dataset.mode){ MODE=t.dataset.mode; applyMode(); return; }
   if(t.dataset.board) THEME.board=t.dataset.board; if(t.dataset.pieces) THEME.pieces=t.dataset.pieces; THEME.v=2; applyTheme();
 });
 

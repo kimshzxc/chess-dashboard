@@ -3,18 +3,20 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="color-scheme" content="light dark">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#0e1014">
 <title>게임 분석</title>
+<script>try{var m=localStorage.getItem('chess-mode');if(m)document.documentElement.dataset.mode=m}catch(e){}</script>
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="game.css">
 </head>
-<body>
+<body data-tab="games">
 <header>
-  <div class="top"><a href="index.html" class="btn">← 대시보드</a><span class="btn" id="tbtn">🎨 테마</span></div>
+  <div class="top"><a href="index.html#games" class="btn" id="backbtn">게임 목록</a><span class="btn" id="tbtn"></span></div>
   <div id="tpanel-slot"></div>
   <div id="head"></div>
 </header>
-<main id="main"><div class="empty">불러오는 중…</div></main>
+<main id="main"><div class="sk" style="height:360px;max-width:470px;margin:14px auto 0"></div><div class="sk" style="height:90px;margin-top:12px"></div></main>
 <footer id="foot"></footer>
 <script src="shared.js"></script>
 <script type="module" src="game.js"></script>

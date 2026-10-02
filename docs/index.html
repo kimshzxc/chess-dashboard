@@ -3,26 +3,29 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="color-scheme" content="light dark">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#0e1014">
 <title>래피드 분석</title>
+<script>try{var m=localStorage.getItem('chess-mode');if(m)document.documentElement.dataset.mode=m}catch(e){}</script>
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="app.css">
 </head>
-<body>
+<body data-tab="home">
 <div class="topbar">
-  <div><h1 id="title"></h1><div class="sub" id="subtitle"></div></div>
-  <span class="btn tbtn" id="tbtn">🎨 테마</span>
+  <div><h1 id="title">래피드 분석</h1><div class="sub" id="subtitle">&nbsp;</div></div>
+  <span class="btn tbtn" id="tbtn"></span>
 </div>
 <div id="tpanel-slot"></div>
 <header>
   <div class="tabs" id="tabs">
     <button data-w="all">전체</button><button data-w="30d">최근 30일</button><button data-w="7d">최근 7일</button>
   </div>
-  <nav class="jump">
-    <a href="#s-weak">보완점</a><a href="#s-recent">최근 게임</a><a href="#s-worst">큰 실수</a><a href="#s-ex">유형별 실수</a><a href="#s-open">오프닝</a><a href="#s-time">시간</a><a href="#s-tilt">틸트</a><a href="#s-phase">국면</a><a href="puzzle.html" class="pzl">퍼즐 ›</a>
-  </nav>
 </header>
-<main id="main"></main>
+<main id="main">
+  <div class="sk sk-hero"></div>
+  <div class="sk-row"><div class="sk"></div><div class="sk"></div><div class="sk"></div></div>
+  <div class="sk sk-card"></div><div class="sk sk-card"></div>
+</main>
 <footer id="foot"></footer>
 <div class="sheet-bg" id="sheet"><div class="sheet"><div class="sheet-h"><div><b id="sheet-title"></b><div class="sub" id="sheet-sub"></div></div><span class="btn" id="sheet-x">닫기</span></div><div class="sheet-b" id="sheet-body"></div></div></div>
 <script src="shared.js"></script>

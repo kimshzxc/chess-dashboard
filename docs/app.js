@@ -6,7 +6,7 @@ const [PIECES, DATA] = await Promise.all([
 document.body.insertAdjacentHTML('afterbegin', PIECES);
 document.title = `${DATA.username} 래피드 분석`;
 let W = 'all';
-$('#tpanel-slot').innerHTML=themePanel();
+$('#tpanel-slot').innerHTML=themePanel(); applyMode();
 
 const gameLink=(url,ply)=>`game.html?id=${gameId(url)}${ply?`&ply=${ply}`:''}`;
 const plyOf=(w)=> (w.move-1)*2+(w.mover==='w'?1:2);
@@ -56,7 +56,7 @@ function openingBody(op, color){
   return h;
 }
 function openingSection(S){
-  let h=`<section id="s-open"><h2>오프닝 탐색기<small>내가 자주 두는 수순을 판에서 확인</small></h2>
+  let h=`<section id="s-open" data-view="mistakes"><h2>오프닝 탐색기<small>내가 자주 두는 수순을 판에서 확인</small></h2>
   <div class="legend"><span><i style="background:${BLUE}"></i>내 다음 수</span><span><i style="background:${GRAY}"></i>상대 다음 수</span><span><i style="background:${RED}"></i>자주 틀리는 수</span><span><i style="background:${GREEN}"></i>엔진 정답</span></div>`;
   for(const [col,name] of [['w','백'],['b','흑']]){
     const rows=S.openings[col]||[];
@@ -122,9 +122,12 @@ function ratingChart(series){
   const col={W:'var(--win)',L:'var(--loss)',D:'var(--draw)'};
   let h=`<div class="tchart-wrap"><svg class="tchart xchart" id="rchart" viewBox="0 0 ${W} ${H}">`;
   for(let v=lo;v<=hi+1e-9;v+=step) h+=`<line x1="${L}" x2="${W-R}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" stroke="var(--line)" stroke-width="1"/><text x="${L-6}" y="${(y(v)+4).toFixed(1)}" font-size="11" text-anchor="end" fill="var(--muted)">${Math.round(v)}</text>`;
-  h+=`<path d="${vals.map((v,i)=>(i?'L':'M')+x(i).toFixed(1)+' '+y(v).toFixed(1)).join(' ')}" fill="none" stroke="var(--me)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
-  const rr=N>120?2.2:N>60?3:4;
-  h+=series.map((s,i)=>`<circle cx="${x(i).toFixed(1)}" cy="${y(s[1]).toFixed(1)}" r="${rr}" fill="${col[s[2]]||col.D}" stroke="var(--surface)" stroke-width="1"/>`).join('');
+  const line=vals.map((v,i)=>(i?'L':'M')+x(i).toFixed(1)+' '+y(v).toFixed(1)).join(' ');
+  h+=`<defs><linearGradient id="rgrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--me)" stop-opacity=".32"/><stop offset="1" stop-color="var(--me)" stop-opacity="0"/></linearGradient></defs>`;
+  h+=`<path d="${line} L${x(N-1).toFixed(1)} ${T+ph} L${L} ${T+ph} Z" fill="url(#rgrad)"/>`;
+  h+=`<path d="${line}" fill="none" stroke="var(--me)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+  const rr=N>120?1.9:N>60?2.6:3.6;
+  h+=series.map((s,i)=>`<circle cx="${x(i).toFixed(1)}" cy="${y(s[1]).toFixed(1)}" r="${rr}" fill="${col[s[2]]||col.D}"/>`).join('');
   h+=`<text x="${L}" y="${H-6}" font-size="11" fill="var(--muted)">${series[0][0]}</text><text x="${W-R}" y="${H-6}" font-size="11" text-anchor="end" fill="var(--muted)">${series[N-1][0]}</text>`;
   h+=`<g class="xc" style="display:none"><line class="xc-l" y1="${T}" y2="${T+ph}" stroke="var(--text2)" stroke-width="1"/><circle class="xc-d" r="5" fill="var(--me)" stroke="var(--surface)" stroke-width="2"/></g>`;
   h+=`</svg><div class="tip"></div></div>`;
@@ -200,7 +203,7 @@ function bars(rows, max){
     if(r.opp!==undefined){
       h+=`<div class="lbl">${esc(r.label)}</div><div class="pair"><div class="bar" style="width:${Math.max(2,r.me/max*100*0.78)}%"><span>${fmt(r.me)}</span></div><div class="bar opp" style="width:${Math.max(2,r.opp/max*100*0.78)}%"><span>${fmt(r.opp)}</span></div></div>`;
     } else {
-      const k=r.note?(r.note.length>8?0.5:0.62):0.78;
+      const k=r.note?(r.note.length>8?0.4:0.6):0.78;
       h+=`<div class="lbl">${esc(r.label)}</div><div><div class="bar" style="width:${Math.max(2,r.me/max*100*k)}%"><span>${fmt(r.me)}${r.note?` <span style="position:static;color:var(--muted)">${esc(r.note)}</span>`:''}</span></div></div>`;
     }
   }
@@ -208,6 +211,21 @@ function bars(rows, max){
 }
 const legend = ()=>`<div class="legend"><span><i style="background:var(--me)"></i>나</span><span><i style="background:var(--opp)"></i>상대</span></div>`;
 
+/* 화면(탭): 홈 / 게임 / 복기 / 통계. 주소의 #games 등으로 유지된다 */
+const VIEWS=['home','games','mistakes','stats'];
+let VIEW=VIEWS.includes(location.hash.slice(1))?location.hash.slice(1):'home';
+function applyView(){
+  document.querySelectorAll('#main>section').forEach(s=>{ s.hidden=s.dataset.view!==VIEW; });
+  document.querySelectorAll('#tabbar a').forEach(a=>a.classList.toggle('on',a.dataset.tab===VIEW));
+}
+window.addEventListener('hashchange',()=>{ const v=location.hash.slice(1); if(VIEWS.includes(v)&&v!==VIEW){ VIEW=v; applyView(); window.scrollTo(0,0); } });
+function puzzleStreakText(){
+  try{ const hst=JSON.parse(localStorage.getItem('puzzle-history')||'{}'); let d=new Date(Date.now()+9*3600*1000), n=0;
+    const key=x=>x.toISOString().slice(0,10); if(!hst[key(d)]) d=new Date(d-864e5);
+    while(hst[key(d)]){ n++; d=new Date(d-864e5); }
+    if(n>0) return `<span class="streak">${n}일 연속</span> · 내가 실제로 틀린 국면에서 최선 수 찾기`; }catch(e){}
+  return '내가 실제로 틀린 국면에서 최선 수 찾기';
+}
 function render(){
   const S = DATA.windows[W];
   document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.w===W));
@@ -215,26 +233,32 @@ function render(){
   $('#foot').innerHTML = `마지막 갱신 ${DATA.generated} (KST) · Stockfish 19 depth ${(DATA.meta||{}).depth||14}, 수순 depth ${(DATA.meta||{}).pv_depth||16} · 게임이 끝나면 1~2분 안에 자동 갱신<br>기물: maestro (sadsnake1, CC BY-NC-SA 4.0), cburnett (GPLv2+), merida (GPLv2+), alpha (Eric Bentzen), california (Jerry S., CC BY-NC-SA 4.0)`;
   if(!S){ $('#subtitle').textContent=''; $('#main').innerHTML='<div class="empty">이 기간에 분석된 래피드 게임이 없습니다.</div>'; return; }
   const o=S.overview, t=S.time, c=S.conversion, tc=S.tactics;
-  $('#subtitle').textContent = `${o.first_date} ~ ${o.last_date} · ${o.games}판 · 레이팅 ${o.rating} (최고 ${o.rating_best})`;
+  $('#subtitle').textContent = `${o.games}판 · 백 ${pct(o.score_w)} · 흑 ${pct(o.score_b)}`;
   let h='';
   const rd=o.rating-o.rating_start;
-  h+=`<section class="hero" style="margin-top:14px"><div class="tiles">
-    <div class="tile"><div class="k">전적 · 승률 <b>${o.score}%</b></div><div class="v sm">${o.win}승 ${o.draw}무 ${o.loss}패</div><div class="d">백 ${pct(o.score_w)} · 흑 ${pct(o.score_b)}</div></div>
-    <div class="tile"><div class="k">정확도</div><div class="v">${o.accuracy}%</div><div class="d">상대 ${o.opp_accuracy}%</div></div>
-    <div class="tile"><div class="k">대실수 / 판</div><div class="v">${o.blunders_pg}</div><div class="d">상대 ${o.opp_blunders_pg}</div></div>
-    <div class="tile"><div class="k">레이팅 변화</div><div class="v" style="color:${rd>0?'var(--win)':rd<0?'var(--loss)':'inherit'}">${rd>=0?'+':''}${rd}</div><div class="d">${o.rating_start} → ${o.rating}</div></div>
+  const up=rd>0, dn=rd<0; const tot=o.win+o.draw+o.loss||1;
+  h+=`<section class="hero" data-view="home"><div class="herocard">
+    <div class="k">래피드 레이팅</div>
+    <div class="big">${o.rating}<span class="delta ${up?'up':dn?'down':''}">${up?'▲':dn?'▼':''} ${Math.abs(rd)}</span></div>
+    <div class="meta">최고 ${o.rating_best} · ${o.rating_start}에서 시작 · ${o.first_date.slice(5)} ~ ${o.last_date.slice(5)}</div>
+    ${S.rating_series&&S.rating_series.length>1?ratingChart(S.rating_series):''}
+    <div class="lg"><span><i class="dot" style="background:var(--win)"></i>승</span><span><i class="dot" style="background:var(--loss)"></i>패</span><span><i class="dot" style="background:var(--draw)"></i>무</span><span>그래프를 누르면 값 표시</span></div>
   </div>
-  ${S.rating_series&&S.rating_series.length>1?`<div class="card" style="margin-top:10px"><div class="sub" style="margin-bottom:4px">레이팅 추이 · 판마다 <i class="dot" style="background:var(--win)"></i>승 <i class="dot" style="background:var(--loss)"></i>패 <i class="dot" style="background:var(--draw)"></i>무 · 누르면 값 표시</div>${ratingChart(S.rating_series)}</div>`:''}
-  <a class="card pz" href="puzzle.html"><div><b>오늘의 퍼즐 10개</b><div class="sub">내가 실제로 틀린 국면에서 최선 수 찾기</div></div><span class="btn on">풀기 ›</span></a>
+  <div class="mini3">
+    <div class="tile"><div class="k">승률</div><div class="v">${o.score}%</div><div class="wdl"><i style="width:${o.win/tot*100}%;background:var(--win)"></i><i style="width:${o.draw/tot*100}%;background:var(--draw)"></i><i style="width:${o.loss/tot*100}%;background:var(--loss)"></i></div><div class="d">${o.win}승 ${o.draw}무 ${o.loss}패</div></div>
+    <div class="tile"><div class="k">정확도</div><div class="v">${o.accuracy}%</div><div class="d">상대 ${o.opp_accuracy}%</div></div>
+    <div class="tile"><div class="k">대실수/판</div><div class="v">${o.blunders_pg}</div><div class="d">상대 ${o.opp_blunders_pg}</div></div>
+  </div>
+  <a class="card pz" href="puzzle.html"><div><b>오늘의 퍼즐 10개</b><div class="sub">${puzzleStreakText()}</div></div><span class="btn on">풀기 ›</span></a>
   </section>`;
-  h+=`<section id="s-weak"><h2>보완점<small>통계에서 자동 추출</small></h2>`;
+  h+=`<section id="s-weak" data-view="home"><h2>보완점<small>통계에서 자동 추출</small></h2>`;
   if(!S.weaknesses.length) h+='<div class="empty">두드러진 약점이 없습니다.</div>';
   for(const w of S.weaknesses){ const ic={critical:'중요',serious:'주의',warning:'참고',good:'강점'}[w.level]||'';
     h+=`<div class="card weak ${w.level}" data-weak="${S.weaknesses.indexOf(w)}"><div class="t"><span class="ic">${ic}</span>${esc(w.title)}</div><p>${esc(w.text)}</p><div class="go">추이 분석 ›</div></div>`; }
   h+='</section>';
   // 최근 게임
   const RECENT_N=6;
-  h+=`<section id="s-recent"><h2>최근 게임<small>카드를 누르면 전체 수순 분석</small></h2><div class="card">`;
+  h+=`<section id="s-recent" data-view="games"><h2>최근 게임<small>카드를 누르면 전체 수순 분석</small></h2><div class="card">`;
   S.recent.forEach((g,gi)=>{
     if(gi===RECENT_N) h+=`<div class="fold" id="fold-recent" hidden>`;
     const how={checkmated:'메이트',resigned:'기권',timeout:'시간',abandoned:'포기',agreed:'합의',repetition:'반복',stalemate:'스테일',insufficient:'기물부족'};
@@ -254,14 +278,14 @@ function render(){
   h+='</div></section>';
   // 최악의 실수
   const WORST_N=8;
-  h+=`<section id="s-worst"><h2>가장 큰 실수<small>승률 30%p 이상 손해 · 빨강 내 수, 초록 정답</small></h2><div class="card">`;
+  h+=`<section id="s-worst" data-view="mistakes"><h2>가장 큰 실수<small>승률 30%p 이상 손해 · 빨강 내 수, 초록 정답</small></h2><div class="card">`;
   if(!S.worst.length) h+='<div class="empty">없음</div>';
   S.worst.forEach((w,i)=>{ if(i===WORST_N) h+=`<div class="fold" id="fold-worst" hidden>`; h+= i<3 ? blunderCard(w) : blunderRow(w,`ww${i}`); });
   if(S.worst.length>WORST_N) h+=`</div><div class="more"><span class="btn" data-fold="fold-worst" data-unit="개">나머지 ${S.worst.length-WORST_N}개 보기</span></div>`;
   h+='</div></section>';
   // 유형별
   const ex=S.examples||{};
-  h+=`<section id="s-ex"><h2>유형별 대표 실수<small>최근 게임부터</small></h2>`;
+  h+=`<section id="s-ex" data-view="mistakes"><h2>유형별 대표 실수<small>최근 게임부터</small></h2>`;
   for(const [k,label,desc] of [['hung','기물 방치','시간이 1분 이상 남았는데 한 수에 잡히는 기물을 둔 장면'],['missed_mate','외통 놓침','3수 이내 강제 외통이 있었는데 다른 수를 둔 장면'],['collapse','유리한 판 붕괴','+3 이상 유리하다가 한 수로 불리해진 장면']]){
     const arr=ex[k]||[]; if(!arr.length) continue;
     h+=`<div class="card"><h3 style="margin-top:0">${label}</h3><div class="sub">${desc}</div>`;
@@ -273,7 +297,7 @@ function render(){
   h+='</section>';
   h+=openingSection(S);
   // 시간
-  h+=`<section id="s-time"><h2>시간 관리</h2><div class="card">${legend()}<div class="sub" style="margin-bottom:6px">N수 시점 남은 시간 (중앙값)</div>`;
+  h+=`<section id="s-time" data-view="stats"><h2>시간 관리</h2><div class="card">${legend()}<div class="sub" style="margin-bottom:6px">N수 시점 남은 시간 (중앙값)</div>`;
   h+=bars(t.clock_at.filter(r=>r.me!=null&&r.opp!=null).map(r=>({label:`${r.move}수`,me:r.me,opp:r.opp,fmt:clk})),600);
   h+=`</div><div class="tiles">
     <div class="tile"><div class="k">시간패</div><div class="v">${t.timeouts}</div><div class="d">이기던 판 ${t.timeouts_winning} · 상대 시간패 ${t.opp_timeouts}</div></div>
@@ -289,7 +313,7 @@ function render(){
   if(tl){
     const pick=(arr,l)=>arr.find(x=>x.label===l)||{};
     const aL=pick(tl.after,'직전 판 패배'), aW=pick(tl.after,'직전 판 승리');
-    h+=`<section id="s-tilt"><h2>틸트·세션<small>30분 이상 비면 새 세션으로 봄 · 괄호는 판 수</small></h2><div class="tiles">
+    h+=`<section id="s-tilt" data-view="stats"><h2>틸트·세션<small>30분 이상 비면 새 세션으로 봄 · 괄호는 판 수</small></h2><div class="tiles">
       <div class="tile"><div class="k">직전 판 패배 후 승률</div><div class="v" style="color:${aL.score!=null&&aL.score<=o.score-8?'var(--loss)':'inherit'}">${pct(aL.score)}</div><div class="d">${aL.n||0}판 · 승리 후 ${pct(aW.score)} (${aW.n||0}판)</div></div>
       <div class="tile"><div class="k">세션</div><div class="v">${tl.sessions.n}</div><div class="d">보통 ${tl.sessions.median_len}판 · 최장 ${tl.sessions.max_len}판 · 6판 이상 ${tl.sessions.long}회</div></div>
     </div>`;
@@ -299,29 +323,29 @@ function render(){
     h+=`<div class="card"><div class="sub" style="margin-bottom:6px">시간대별 승률 (KST)</div>${sb(tl.hours)}</div></section>`;
   }
   // 국면
-  h+=`<section id="s-phase"><h2>국면별</h2><div class="card"><table><tr><th>국면</th><th class="n">수</th><th class="n">정확도</th><th class="n">상대</th><th class="n">대실수율</th></tr>`;
+  h+=`<section id="s-phase" data-view="stats"><h2>국면별</h2><div class="card"><table><tr><th>국면</th><th class="n">수</th><th class="n">정확도</th><th class="n">상대</th><th class="n">대실수율</th></tr>`;
   for(const p of S.phase) h+=`<tr><td>${p.label}</td><td class="n">${p.moves}</td><td class="n">${p.accuracy}%</td><td class="n">${p.opp_accuracy}%</td><td class="n">${p.blunder_rate}%</td></tr>`;
   h+=`</table></div>`;
   if(S.blunder_by_move.length) h+=`<div class="card"><div class="sub" style="margin-bottom:6px">수 구간별 대실수율</div>${bars(S.blunder_by_move.map(b=>({label:b.label+'수',me:b.rate,fmt:pct})),Math.max(...S.blunder_by_move.map(b=>b.rate),1))}</div>`;
   h+='</section>';
   const cw=c.winning, cl=c.losing;
-  h+=`<section><h2>마무리와 역전</h2><div class="tiles">
+  h+=`<section data-view="stats"><h2>마무리와 역전</h2><div class="tiles">
     <div class="tile"><div class="k">+3 이상 유리했던 판</div><div class="v">${cw.n?Math.round(cw.won/cw.n*100):0}% 승</div><div class="d">${cw.n}판 중 ${cw.won}승 ${cw.draw}무 <b style="color:var(--loss)">${cw.lost}패</b></div></div>
     <div class="tile"><div class="k">-3 이하 불리했던 판</div><div class="v">${cl.n?Math.round(cl.won/cl.n*100):0}% 역전</div><div class="d">${cl.n}판 중 ${cl.won}승 ${cl.draw}무 ${cl.lost}패</div></div>
   </div></section>`;
   const hungRows=Object.entries(tc.hung).sort((a,b)=>b[1]-a[1]);
-  h+=`<section><h2>전술</h2><div class="tiles">
+  h+=`<section data-view="stats"><h2>전술</h2><div class="tiles">
     <div class="tile"><div class="k">기물 방치 (한 수에 잡히는 기물)</div><div class="v">${tc.hung_total}</div><div class="d">판당 ${tc.hung_pg} · ${hungRows.map(([k,v])=>`${k} ${v}`).join(' · ')||'-'}<br>시간 1분 이상 남았을 때 ${tc.hung_with_time}회</div></div>
     <div class="tile"><div class="k">공짜 기물 안 잡음</div><div class="v">${tc.missed_free}</div><div class="d">잡는 수가 최선(+2 이상)인데 다른 수</div></div>
     <div class="tile"><div class="k">외통 놓침</div><div class="v">${tc.missed_mate_total}</div><div class="d">${Object.entries(tc.missed_mate).map(([k,v])=>`${k}${k==='5'?'+':''}수 외통 ${v}`).join(' · ')||'-'}</div></div>
   </div></section>`;
   if(S.monthly.length>1){
-    h+=`<section><h2>월별 추이</h2><div class="card"><table><tr><th>월</th><th class="n">판</th><th class="n">승률</th><th class="n">정확도</th><th class="n">대실수/판</th><th class="n">레이팅</th></tr>`;
+    h+=`<section data-view="stats"><h2>월별 추이</h2><div class="card"><table><tr><th>월</th><th class="n">판</th><th class="n">승률</th><th class="n">정확도</th><th class="n">대실수/판</th><th class="n">레이팅</th></tr>`;
     for(const m of S.monthly) h+=`<tr><td>${m.month}</td><td class="n">${m.games}</td><td class="n">${m.score}%</td><td class="n">${m.accuracy}%</td><td class="n">${m.blunders_pg}</td><td class="n">${m.rating}</td></tr>`;
     h+='</table></div></section>';
   }
   $('#main').innerHTML=h;
-  drawAll(); applyTheme();
+  drawAll(); applyTheme(); applyView();
 }
 document.addEventListener('click',(e)=>{
   const t=e.target.closest('[data-fold]'); if(!t) return;
