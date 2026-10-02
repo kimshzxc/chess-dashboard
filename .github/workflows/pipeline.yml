@@ -1,31 +1,35 @@
-# 10분마다 체스닷컴 게임 수집 → 스톡피시 분석 → 대시보드 생성 → ntfy 알림 → docs/ 와 data/chess.db 커밋
+# 체스닷컴 게임 감시 → 스톡피시 분석 → 대시보드 생성 → ntfy 알림 → docs/ 와 data/chess.db 커밋
+#
+# 한 번 실행되면 약 5시간 45분 동안 1분마다 새 게임을 확인하고, 끝나기 전에 다음 실행을 스스로 예약한다.
+# 30분 간격 스케줄은 체인이 끊겼을 때 다시 시작하는 안전망이다 (실행 중이면 대기열에만 쌓이고 겹치지 않는다).
 name: chess pipeline
 
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "*/30 * * * *"
   workflow_dispatch:
     inputs:
       render_only:
-        description: "새 게임 수집 없이 대시보드만 다시 생성"
+        description: "새 게임 수집 없이 대시보드만 다시 생성 (진행 중인 감시가 끝난 뒤 실행됨)"
         type: boolean
         default: false
 
 permissions:
   contents: write
+  actions: write
 
-# 이전 실행이 끝나기 전에 다음 실행이 겹치지 않도록
 concurrency:
   group: chess-pipeline
   cancel-in-progress: false
 
 env:
   STOCKFISH_TAG: sf_19
+  WATCH_MINUTES: 345
 
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
 
@@ -58,21 +62,43 @@ jobs:
       - name: Stockfish 동작 확인
         run: (echo uci; echo quit) | ./engine/stockfish | grep -m1 '^id name'
 
-      - name: 파이프라인 실행
+      - name: 감시 루프
         env:
           CHESSCOM_USERNAME: ${{ secrets.CHESSCOM_USERNAME }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           GITHUB_OWNER: ${{ github.repository_owner }}
           GITHUB_REPO: ${{ github.event.repository.name }}
           STOCKFISH_PATH: ${{ github.workspace }}/engine/stockfish
-        run: python pipeline.py --no-push ${{ inputs.render_only && '--render-only' || '' }}
-
-      - name: 결과 커밋
+          RENDER_ONLY: ${{ inputs.render_only }}
         run: |
+          set -uo pipefail
           git config user.name "chess-pipeline"
           git config user.email "actions@users.noreply.github.com"
-          git add data/chess.db docs
-          if git diff --cached --quiet; then echo "변경 없음"; exit 0; fi
-          git commit -m "update $(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M')"
-          git pull --rebase origin main
-          git push origin HEAD:main
+          commit_if_changed() {
+            git add data/chess.db docs
+            git diff --cached --quiet && return 0
+            git commit -q -m "update $(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M')"
+            git pull -q --rebase origin main && git push -q origin HEAD:main && echo "커밋·푸시 완료" || echo "푸시 실패 (다음 반복에서 재시도)"
+          }
+          if [ "$RENDER_ONLY" = "true" ]; then
+            python pipeline.py --no-push --render-only
+            commit_if_changed
+            exit 0
+          fi
+          end=$(( SECONDS + WATCH_MINUTES * 60 )); i=0
+          echo "감시 시작: ${WATCH_MINUTES}분 동안 1분마다 확인 (10분마다 전체 확인, 5분마다 코드 갱신)"
+          while [ $SECONDS -lt $end ]; do
+            i=$((i + 1))
+            flag="--quick"; [ $((i % 10)) -eq 1 ] && flag=""
+            python pipeline.py --no-push $flag || echo "파이프라인 오류 (계속 진행)"
+            commit_if_changed
+            if [ $((i % 5)) -eq 0 ]; then git pull -q --rebase origin main || true; fi
+            sleep 60
+          done
+          echo "감시 종료"
+
+      - name: 다음 실행 예약
+        if: success() && inputs.render_only != true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run pipeline.yml --ref main
