@@ -1,0 +1,20 @@
+header{position:static;border-bottom:0;padding:calc(10px + env(safe-area-inset-top,0px)) 0 0}
+.top{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.prog{display:flex;justify-content:space-between;align-items:center;gap:10px;margin:12px 0 8px}
+.prog b{font-size:18px}
+.prog .dots{display:flex;gap:5px}
+.prog .dots i{width:12px;height:12px;border-radius:50%;background:var(--line);display:block}
+.prog .dots i.ok{background:var(--good)}.prog .dots i.ng{background:var(--critical)}.prog .dots i.cur{box-shadow:0 0 0 2px var(--me)}
+.task{font-size:16px;font-weight:600;text-align:center;margin:6px 0 8px}
+.task .sub{font-weight:400;margin-top:2px}
+.pzboard{max-width:440px;margin:0 auto;position:relative}
+.pzboard .board{cursor:pointer}
+.result{border-radius:12px;padding:12px 14px;font-size:15px;line-height:1.5;border:1px solid var(--line);background:var(--surface);border-left:5px solid var(--muted);margin-top:10px;max-width:440px;margin-left:auto;margin-right:auto}
+.result.ok{border-left-color:var(--good)}.result.ng{border-left-color:var(--critical)}
+.result .ic{display:inline-block;font-size:12px;font-weight:600;padding:2px 8px;border-radius:7px;color:#fff;background:var(--muted);margin-right:6px;vertical-align:2px}
+.result.ok .ic{background:var(--good)}.result.ng .ic{background:var(--critical)}
+.acts{display:flex;gap:8px;justify-content:center;margin-top:10px;flex-wrap:wrap}
+.acts .btn{min-width:120px}
+.done{text-align:center;padding:20px 0}
+.done .big{font-size:40px;font-weight:700;letter-spacing:-.02em}
+.viewer{max-width:440px;margin-left:auto;margin-right:auto}

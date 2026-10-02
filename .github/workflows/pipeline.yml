@@ -38,7 +38,12 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - run: pip install -r requirements.txt
+      - run: |
+          sudo apt-get install -y -qq libcairo2 >/dev/null 2>&1 || true   # 알림 보드 이미지(cairosvg)용
+          pip install -r requirements.txt
+
+      - name: 스모크 테스트
+        run: python -m unittest discover -s tests
 
       - name: Stockfish 캐시
         id: sf
@@ -85,12 +90,15 @@ jobs:
             commit_if_changed
             exit 0
           fi
-          end=$(( SECONDS + WATCH_MINUTES * 60 )); i=0
+          end=$(( SECONDS + WATCH_MINUTES * 60 )); i=0; fails=0
           echo "감시 시작: ${WATCH_MINUTES}분 동안 1분마다 확인 (10분마다 전체 확인, 5분마다 코드 갱신)"
           while [ $SECONDS -lt $end ]; do
             i=$((i + 1))
             flag="--quick"; [ $((i % 10)) -eq 1 ] && flag=""
-            python pipeline.py --no-push $flag || echo "파이프라인 오류 (계속 진행)"
+            if python pipeline.py --no-push $flag; then fails=0; else
+              fails=$((fails + 1)); echo "파이프라인 오류 ${fails}회 연속 (계속 진행)"
+              if [ $fails -eq 5 ]; then curl -s -o /dev/null -H "Title: chess pipeline 오류" -H "Tags: warning" -H "Click: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" -d "파이프라인이 5회 연속 실패했습니다. Actions 로그를 확인하세요." "https://ntfy.sh/$NTFY_TOPIC" || true; fi
+            fi
             commit_if_changed
             if [ $((i % 5)) -eq 0 ]; then git pull -q --rebase origin main || true; fi
             sleep 60
@@ -102,3 +110,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run pipeline.yml --ref main
+
+      - name: 실패 알림
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: |
+          # 직전 실행도 실패였으면 (30분마다 재시도되므로) 알림을 반복하지 않는다
+          prev=$(gh run list --workflow pipeline.yml --limit 2 --json conclusion -q '.[1].conclusion' 2>/dev/null || echo "")
+          if [ "$prev" = "failure" ]; then echo "직전 실행도 실패, 알림 생략"; exit 0; fi
+          curl -s -o /dev/null -H "Title: chess pipeline 실패" -H "Tags: rotating_light" \
+            -H "Click: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            -d "GitHub Actions 실행이 실패했습니다. 30분 뒤 자동 재시도합니다. 눌러서 로그 확인." "https://ntfy.sh/$NTFY_TOPIC" || true

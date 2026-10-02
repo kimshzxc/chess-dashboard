@@ -7,13 +7,15 @@
 | 파일 | 역할 |
 |---|---|
 | `pipeline.py` | 수집 → 분석 → 통계 → 대시보드 생성 → 알림 → GitHub 업로드 (크론이 실행) |
-| `render.py` | 통계 JSON을 모바일 대시보드 HTML로 변환 |
+| `render.py` | 기물 SVG 세트를 `docs/pieces.svg` 로 묶기 |
+| `docs/*.html, *.js, *.css` | 대시보드·게임 분석·퍼즐 페이지 (정적 파일, 직접 수정) |
+| `tests/` | 스모크 테스트 (`python -m unittest discover -s tests`) |
 | `setup.sh` | 새 환경 초기 설치 (venv, 스톡피시, 크론) |
 | `import_existing.py` | 예전 분석 결과를 DB로 가져오기 (1회용) |
 | `check_env.sh` | `.env` 값과 토큰/알림 연결 확인 |
 | `.env` | 사용자명, GitHub 토큰, ntfy 주제 (git에 올라가지 않음) |
 | `data/chess.db` | 모든 게임과 수별 분석 결과 (SQLite). 이 파일만 복사하면 이식 완료 |
-| `docs/` | 생성된 대시보드. GitHub Pages가 이 폴더를 서비스 |
+| `docs/stats.json`, `docs/puzzles.json`, `docs/games/` | 파이프라인이 생성하는 데이터. GitHub Pages가 `docs/` 를 서비스 |
 | `.github/workflows/pipeline.yml` | GitHub Actions 감시 루프 (서버에서 1분마다 새 게임 확인) |
 | `logs/cron.log` | 실행 기록 |
 
@@ -34,7 +36,9 @@ tail -f logs/cron.log                       # 크론 로그 보기
 - 1분 확인은 1KB 짜리 플레이어 통계 API 로 마지막 게임 시각만 보고(`--quick`), 10분에 한 번 월간 기보 전체를 받아 보완합니다.
 - 30분 간격 스케줄은 체인이 끊겼을 때(오류, GitHub 장애) 다시 시작하는 안전망입니다. 실행 중이면 대기열에만 쌓이고 겹치지 않습니다.
 - 저장소 Settings → Secrets and variables → Actions 에 `CHESSCOM_USERNAME`, `NTFY_TOPIC` 두 개가 있어야 합니다.
-- `data/chess.db` 와 `docs/` 는 새 게임이 분석될 때마다 저장소에 커밋됩니다. 스톡피시는 첫 실행 때 내려받아 캐시합니다.
+- `data/chess.db` 와 `docs/` 는 새 게임이 분석될 때마다 저장소에 커밋됩니다 (커밋 전 VACUUM). 스톡피시는 첫 실행 때 내려받아 캐시합니다.
+- 실행이 실패하면 ntfy 로 알림이 오고 30분 뒤 자동 재시도합니다. 연속 실패는 한 번만 알립니다.
+- 알림에는 결정적 실수 국면의 보드 이미지가 붙고, 누르면 그 장면의 게임 페이지가 열립니다.
 - 코드를 고치면 `pipeline.py`, `render.py` 를 커밋하기만 하면 됩니다. 실행 중인 루프가 5분마다 저장소를 당겨오고 `docs/.code-hash` 로 변경을 감지해 대시보드를 다시 만듭니다. 워크플로 파일 자체의 변경은 다음 실행부터 적용됩니다.
 - Actions 탭 → chess pipeline → Run workflow 로 수동 실행할 수 있습니다. "대시보드만 다시 생성"은 진행 중인 감시가 끝난 뒤에야 실행되므로, 보통은 코드만 커밋하는 편이 빠릅니다.
 - 로컬에서도 돌릴 수는 있지만, Actions 와 동시에 돌리면 DB 가 갈라지므로 둘 중 하나만 쓰세요. 로컬에서 쓰려면 먼저 저장소에서 최신 `data/chess.db` 를 받아오세요.
@@ -51,7 +55,9 @@ tail -f logs/cron.log                       # 크론 로그 보기
 
 ## 분석 기준
 
-- Stockfish 19, depth 14, 모든 수 평가
+- Stockfish 19, depth 18, 모든 수 평가. 깊이를 바꾸면 기존 게임은 실행마다 15판씩 자동으로 다시 분석됩니다 (`games.depth` 열로 추적)
 - 대실수: 100분율 승률 기준이 아닌 센티폰 300 이상 손실. 실수: 100~299. 정확도: 리체스 공식
 - 기물 방치: 내 수 다음 상대 최선수가 내 기물(폰 제외)을 잡는 경우
 - 오프닝 = 1~10수, 엔드게임 = 폰과 킹 제외 기물 가치 합 14 이하
+- 세션 = 게임 사이 간격 30분 이내. 틸트 통계는 같은 세션 안의 직전 결과·연패만 봅니다
+- 퍼즐 = 내 수 중 승률 20%p 이상 잃은 국면 (이미 -3 이하로 진 국면 제외), 최근 200개

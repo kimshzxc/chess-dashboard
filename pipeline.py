@@ -19,7 +19,8 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 DATA = os.path.join(ROOT, "data")
 DOCS = os.path.join(ROOT, "docs")
 DB_PATH = os.path.join(DATA, "chess.db")
-DEPTH = 14
+DEPTH = 18
+REANALYZE_BATCH = 15   # 깊이가 바뀌면 한 번 실행에 이만큼씩 다시 분석 (새 게임이 항상 먼저)
 WORKERS = 3
 UA = "chess-dashboard/1.0 (personal analysis; github.com/{owner}/{repo})"
 KST = timezone(timedelta(hours=9))
@@ -77,6 +78,9 @@ def db():
     cols = {r[1] for r in con.execute("PRAGMA table_info(games)")}
     if "pushed" not in cols:
         con.execute("ALTER TABLE games ADD COLUMN pushed INTEGER DEFAULT 0")
+        con.commit()
+    if "depth" not in cols:
+        con.execute("ALTER TABLE games ADD COLUMN depth INTEGER")
         con.commit()
     return con
 
@@ -344,16 +348,23 @@ def store_analysis(con, url, plies):
     con.execute("DELETE FROM plies WHERE url=?", (url,))
     con.executemany(f"INSERT INTO plies(url,{','.join(PLY_COLS)}) VALUES(?,{','.join('?' * len(PLY_COLS))})",
                     [(url, *[p.get(c) for c in PLY_COLS]) for p in plies])
-    con.execute("UPDATE games SET analyzed=1, summary=? WHERE url=?", (json.dumps(summarize(plies)), url))
+    con.execute("UPDATE games SET analyzed=1, depth=?, summary=? WHERE url=?", (DEPTH, json.dumps(summarize(plies)), url))
     con.commit()
 
 
 def analyze_pending(con, cfg):
     sf = stockfish_path(cfg)
     rows = con.execute("SELECT url,pgn,my_color FROM games WHERE analyzed=0 ORDER BY end_time").fetchall()
-    if not rows:
+    redo = con.execute("SELECT url,pgn,my_color FROM games WHERE analyzed=1 AND (depth IS NULL OR depth!=?) ORDER BY end_time DESC LIMIT ?",
+                       (DEPTH, REANALYZE_BATCH)).fetchall()
+    if not rows and not redo:
         return []
-    log(f"분석 대기 {len(rows)}판 (depth {DEPTH}, {WORKERS} 프로세스)")
+    if rows:
+        log(f"분석 대기 {len(rows)}판 (depth {DEPTH}, {WORKERS} 프로세스)")
+    if redo:
+        left = con.execute("SELECT COUNT(*) FROM games WHERE analyzed=1 AND (depth IS NULL OR depth!=?)", (DEPTH,)).fetchone()[0]
+        log(f"깊이 {DEPTH} 로 재분석 {len(redo)}판 (남은 {left}판)")
+    rows = list(rows) + list(redo)
     tasks = [(r["url"], r["pgn"], r["my_color"], sf) for r in rows]
     done = []
     t0 = time.time()
@@ -384,6 +395,78 @@ def load_games(con, since_ts=None):
 def median(v):
     v = sorted(v)
     return v[len(v) // 2] if v else None
+
+
+def with_lines(con, w):
+    """실수 레코드에 uci / 정답 수순 / 반격 수순 / 이후 FEN 을 붙인다 (뷰어·퍼즐·알림용)."""
+    if not w or not w.get("fen"):
+        return w
+    w = dict(w)
+    if not w.get("uci"):
+        w["uci"] = uci_of(w["fen"], w["san"])
+        w["best_uci"] = uci_of(w["fen"], w["best"]) if w.get("best") else None
+    w.update(cached_lines(con, w["fen"], w["san"]) if con else dict(best_line=[], refutation=[]))
+    try:
+        b = chess.Board(w["fen"]); b.push_san(w["san"]); w["after_fen"] = b.fen()
+    except Exception:
+        w["after_fen"] = None
+    return w
+
+
+SESSION_GAP = 1800   # 30분 이상 비면 새 세션
+
+
+def session_context(games):
+    """게임(시간순) → {url: dict(pos=세션 내 몇 판째, streak=같은 세션에서 직전 연패 수, prev=직전 판 결과 또는 None, hour=KST 시)}"""
+    ctx, prev, streak, pos = {}, None, 0, 0
+    for g in games:
+        if prev is None or g["end_time"] - prev["end_time"] > SESSION_GAP:
+            streak, pos, prev_out = 0, 0, None
+        else:
+            prev_out = prev["outcome"]
+        pos += 1
+        ctx[g["url"]] = dict(pos=pos, streak=streak, prev=prev_out, hour=datetime.fromtimestamp(g["end_time"], KST).hour)
+        streak = streak + 1 if g["outcome"] == "L" else 0
+        prev = g
+    return ctx
+
+
+def _score(outs):
+    c = Counter(outs)
+    return round((c["W"] + 0.5 * c["D"]) / len(outs) * 100, 1) if outs else None
+
+
+def tilt_stats(games):
+    """틸트·세션: 직전 결과별 승률, 연패 후 승률, 세션 내 순서별 승률·정확도, 시간대별."""
+    ctx = session_context(games)
+    after, streak, spos, hours = defaultdict(list), defaultdict(list), defaultdict(list), defaultdict(list)
+    for g in games:
+        c = ctx[g["url"]]
+        if c["prev"]:
+            after[c["prev"]].append(g)
+            streak[min(c["streak"], 3)].append(g)
+        spos[1 if c["pos"] == 1 else 2 if c["pos"] == 2 else 3 if c["pos"] == 3 else 4 if c["pos"] <= 5 else 6].append(g)
+        hours[c["hour"] // 6].append(g)
+    def pack(gs, label):
+        acc_v = acc([p["wp_loss"] for g in gs for p in g["plies"] if p["mine"]]) if gs else None
+        return dict(label=label, n=len(gs), score=_score([g["outcome"] for g in gs]), accuracy=acc_v,
+                    blunders_pg=round(sum(g["summary"].get("blunders", 0) for g in gs) / len(gs), 2) if gs else None)
+    sess, cur = [], []
+    for g in games:
+        if cur and g["end_time"] - cur[-1]["end_time"] > SESSION_GAP:
+            sess.append(cur); cur = []
+        cur.append(g)
+    if cur:
+        sess.append(cur)
+    lens = sorted(len(x) for x in sess)
+    return dict(
+        after=[pack(after[k], l) for k, l in (("W", "직전 판 승리"), ("D", "직전 판 무승부"), ("L", "직전 판 패배"))],
+        streak=[pack(streak[k], l) for k, l in ((0, "연패 없음"), (1, "1연패 후"), (2, "2연패 후"), (3, "3연패 이상 후"))],
+        session_pos=[pack(spos[k], l) for k, l in ((1, "세션 1판째"), (2, "2판째"), (3, "3판째"), (4, "4~5판째"), (6, "6판째 이후"))],
+        sessions=dict(n=len(sess), median_len=lens[len(lens) // 2] if lens else 0, max_len=lens[-1] if lens else 0,
+                      long=sum(1 for x in sess if len(x) >= 6)),
+        hours=[pack(hours[k], l) for k, l in ((0, "0~6시"), (1, "6~12시"), (2, "12~18시"), (3, "18~24시"))],
+    )
 
 
 def compute_stats(games, con=None):
@@ -537,20 +620,11 @@ def compute_stats(games, con=None):
                                  rating=gs[-1]["my_elo"], score=round((cc["W"] + 0.5 * cc["D"]) / len(gs) * 100),
                                  blunders_pg=round(sum(1 for p in mp if p["loss"] >= 300) / len(gs), 2)))
 
+    # --- 틸트 / 세션, 레이팅 추이
+    S["tilt"] = tilt_stats(games)
+    S["rating_series"] = [[g["date"], g["my_elo"], g["outcome"]] for g in games]
+
     # --- 최근 게임 / 최악의 실수
-    def with_lines(w):
-        if not w or not w.get("fen"):
-            return w
-        w = dict(w)
-        if not w.get("uci"):
-            w["uci"] = uci_of(w["fen"], w["san"])
-            w["best_uci"] = uci_of(w["fen"], w["best"]) if w.get("best") else None
-        w.update(cached_lines(con, w["fen"], w["san"]) if con else dict(best_line=[], refutation=[]))
-        try:
-            b = chess.Board(w["fen"]); b.push_san(w["san"]); w["after_fen"] = b.fen()
-        except Exception:
-            w["after_fen"] = None
-        return w
     S["recent"] = []
     for g in games[-25:][::-1]:
         evals = [max(-1000, min(1000, p["cp_after"] if p["mine"] else -p["cp_after"])) for p in g["plies"]]
@@ -559,7 +633,7 @@ def compute_stats(games, con=None):
                                 eco_name=g["eco_name"][:35], evals=evals,
                                 **{k: g["summary"].get(k) for k in ("accuracy", "blunders", "mistakes", "hung", "missed_mate",
                                                                     "my_final_clock", "opp_final_clock", "n_moves")},
-                                worst=with_lines(g["summary"].get("worst"))))
+                                worst=with_lines(con, g["summary"].get("worst"))))
     worst = []
     for g in games:
         for p in g["plies"]:
@@ -568,7 +642,7 @@ def compute_stats(games, con=None):
                                   san=p["san"], best=p["best"], cp_before=p["cp_before"], cp_after=p["cp_after"], wp_loss=p["wp_loss"],
                                   clock=p["clock"], spent=p["spent"], phase=p["phase"], fen=p["fen"]))
     worst.sort(key=lambda w: (-w["wp_loss"], w["date"]))
-    S["worst"] = [with_lines(w) for w in worst[:15]]
+    S["worst"] = [with_lines(con, w) for w in worst[:15]]
     # 유형별 대표 실수 (기물 방치 / 외통 놓침 / 유리한 판 붕괴) 각 5개
     S["examples"] = dict(hung=[], missed_mate=[], collapse=[])
     for g in games[::-1]:
@@ -587,7 +661,7 @@ def compute_stats(games, con=None):
             elif len(S["examples"]["collapse"]) < 5 and p["cp_before"] >= 300 and p["cp_after"] <= -100:
                 S["examples"]["collapse"].append(base)
     for k in S["examples"]:
-        S["examples"][k] = [with_lines(w) for w in S["examples"][k]]
+        S["examples"][k] = [with_lines(con, w) for w in S["examples"][k]]
     S["weaknesses"] = weaknesses(S, games)
     return S
 
@@ -783,15 +857,23 @@ METRICS = {
     "missed_mate": ("외통 놓침 (판당)", "num2", True, False),
     "opening": ("이 오프닝 승률", "pct", False, True),
     "endgame_acc": ("엔드게임 정확도", "pct100", False, False),
+    "tilt": ("같은 세션 2연패 직후 판의 승률", "pct", False, True),
+    "late_session": ("세션 6판째 이후 판의 승률", "pct", False, True),
 }
 
 
 def metric_series(games, key, arg=None):
     """보완점 지표를 게임 단위 시계열 [{d: 날짜, v: 분자, n: 분모}] 로."""
     out = []
+    ctx = session_context(games) if key in ("tilt", "late_session") else {}
     for g in games:
         s = g["summary"]; mine = [p for p in g["plies"] if p["mine"]]
-        if key == "clock20":
+        if key in ("tilt", "late_session"):
+            c = ctx[g["url"]]
+            if (key == "tilt" and c["streak"] < 2) or (key == "late_session" and c["pos"] < 6):
+                continue
+            v, n = {"W": 1, "D": 0.5, "L": 0}[g["outcome"]], 1
+        elif key == "clock20":
             if s.get("my_clock_20") is None or s.get("opp_clock_20") is None:
                 continue
             v, n = s["opp_clock_20"] - s["my_clock_20"], 1
@@ -916,6 +998,22 @@ def weaknesses(S, games=None):
                 out.append(dict(level="warning", title=f"{name} 오프닝", key="opening", arg=[c, o["moves"]],
                                 text=f"{o['moves']} ({o['name']}) {o['n']}판 승률 {o['score']}%, "
                                      f"15수 안 대실수 {o['early_blunders']}회. 이 라인의 기본 계획을 하나 정해 두세요."))
+    tl = S.get("tilt")
+    if tl:
+        s2 = next((x for x in tl["streak"] if x["label"] == "2연패 후"), None)
+        s3 = next((x for x in tl["streak"] if x["label"] == "3연패 이상 후"), None)
+        n2 = (s2["n"] if s2 else 0) + (s3["n"] if s3 else 0)
+        if n2 >= 10:
+            w2 = (s2["score"] * s2["n"] + s3["score"] * s3["n"]) / n2 if s2 and s3 else (s2 or s3)["score"]
+            if w2 <= ov["score"] - 10:
+                out.append(dict(level="serious", title="연패 후 틸트", key="tilt",
+                                text=f"같은 세션에서 2연패한 직후의 판은 승률 {w2:.0f}%로 평소({ov['score']}%)보다 크게 낮습니다({n2}판). "
+                                     "2연패하면 그날은 멈추거나 최소 30분 쉬세요."))
+        late = next((x for x in tl["session_pos"] if x["label"] == "6판째 이후"), None)
+        if late and late["n"] >= 10 and late["score"] <= ov["score"] - 10:
+            out.append(dict(level="warning", title="긴 세션", key="late_session",
+                            text=f"한 세션에서 6판째 이후의 승률이 {late['score']}%로 평소({ov['score']}%)보다 낮습니다({late['n']}판, 정확도 {late['accuracy']}%). "
+                                 "세션을 5판 안팎으로 끊는 편이 좋습니다."))
     ph = {p["phase"]: p for p in S["phase"]}
     if "endgame" in ph and "middlegame" in ph and ph["endgame"]["accuracy"] - ph["middlegame"]["accuracy"] >= 4:
         out.append(dict(level="good", title="엔드게임은 강점", key="endgame_acc",
@@ -970,7 +1068,8 @@ def export_game(con, g):
     summary = json.loads(g["summary"]) if isinstance(g.get("summary"), str) else (g.get("summary") or {})
     data = dict(id=game_id(g["url"]), url=g["url"], date=g["date"], white=g["white"], black=g["black"], welo=g["welo"], belo=g["belo"],
                 my_color=g["my_color"], result=g["result"], outcome=g["outcome"], termination=g["termination"],
-                eco_name=g["eco_name"], summary=summary, plies=out, fens=fens, lines=lines)
+                eco_name=g["eco_name"], summary=summary, plies=out, fens=fens, lines=lines,
+                depth=g.get("depth") or DEPTH, pv_depth=LINE_DEPTH)
     os.makedirs(os.path.join(DOCS, "games"), exist_ok=True)
     path = os.path.join(DOCS, "games", f"{data['id']}.json")
     json.dump(data, open(path, "w"), ensure_ascii=False, separators=(",", ":"))
@@ -1007,18 +1106,47 @@ def notify(cfg, game, summary, dashboard_url):
         lines.append(f"기물 방치 {summary['hung']}회")
     if summary.get("missed_mate"):
         lines.append(f"외통 놓침 {summary['missed_mate']}회")
-    body = json.dumps({"topic": topic, "title": f"래피드 {res}{'(' + detail + ')' if detail else ''} · 레이팅 {game['my_elo']}",
-                       "message": "\n".join(lines),
-                       "click": f"{dashboard_url.rstrip('/')}/game.html?id={game_id(game['url'])}",
-                       "actions": [{"action": "view", "label": "대시보드", "url": dashboard_url},
-                                   {"action": "view", "label": "체스닷컴", "url": game["url"]}],
-                       "tags": ["trophy" if game["outcome"] == "W" else "x"]}, ensure_ascii=False).encode()
-    req = urllib.request.Request("https://ntfy.sh/", data=body, headers={"Content-Type": "application/json"})
+    title = f"래피드 {res}{'(' + detail + ')' if detail else ''} · 레이팅 {game['my_elo']}"
+    click = f"{dashboard_url.rstrip('/')}/game.html?id={game_id(game['url'])}{'&ply=' + str((w['move'] - 1) * 2 + (1 if w['mover'] == 'w' else 2)) if w else ''}"
+    actions = [{"action": "view", "label": "대시보드", "url": dashboard_url}, {"action": "view", "label": "체스닷컴", "url": game["url"]}]
+    tags = ["trophy" if game["outcome"] == "W" else "x"]
+    png = board_png(w, game["my_color"]) if w and w.get("fen") else None
     try:
+        if png:
+            # 이미지 첨부는 PUT 본문이 파일이라 메타데이터를 헤더로 보낸다. 한글은 RFC 2047 로 인코딩.
+            rfc = lambda t: "=?UTF-8?B?" + base64.b64encode(t.encode()).decode() + "?="
+            h = {"Content-Type": "image/png", "Filename": "board.png", "Title": rfc(title), "Message": rfc("\n".join(lines)),
+                 "Click": click, "Tags": ",".join(tags),
+                 "Actions": rfc("; ".join(f"view, {a['label']}, {a['url']}" for a in actions))}
+            req = urllib.request.Request(f"https://ntfy.sh/{topic}", data=png, headers=h, method="PUT")
+        else:
+            body = json.dumps({"topic": topic, "title": title, "message": "\n".join(lines), "click": click,
+                               "actions": actions, "tags": tags}, ensure_ascii=False).encode()
+            req = urllib.request.Request("https://ntfy.sh/", data=body, headers={"Content-Type": "application/json"})
         urllib.request.urlopen(req, timeout=30).read()
-        log(f"알림 전송: {game['url']}")
+        log(f"알림 전송: {game['url']}{' (보드 이미지 포함)' if png else ''}")
     except Exception as e:
         log(f"알림 실패: {e}")
+
+
+def board_png(w, my_color):
+    """결정적 실수 국면을 PNG 로 (빨강: 내 수, 초록: 정답). cairosvg 가 없으면 None."""
+    try:
+        import chess.svg, cairosvg
+        b = chess.Board(w["fen"])
+        uci = w.get("uci") or uci_of(w["fen"], w["san"])
+        best_uci = w.get("best_uci") or (uci_of(w["fen"], w["best"]) if w.get("best") else None)
+        arrows = []
+        if uci:
+            arrows.append(chess.svg.Arrow(chess.parse_square(uci[:2]), chess.parse_square(uci[2:4]), color="#d03b3bcc"))
+        if best_uci:
+            arrows.append(chess.svg.Arrow(chess.parse_square(best_uci[:2]), chess.parse_square(best_uci[2:4]), color="#149a14cc"))
+        svg = chess.svg.board(b, orientation=chess.WHITE if my_color == "w" else chess.BLACK, arrows=arrows, size=640,
+                              colors={"square light": "#EBECD0", "square dark": "#739552"})
+        return cairosvg.svg2png(bytestring=svg.encode())
+    except Exception as e:
+        log(f"보드 이미지 생성 실패: {e}")
+        return None
 
 
 # ---------------------------------------------------------------- github
@@ -1128,23 +1256,45 @@ def _read_code_hash():
     return open(p).read().strip() if os.path.exists(p) else ""
 
 
+def export_puzzles(con, limit=200):
+    """내 실수 국면을 퍼즐로: 승률 20%p 이상 잃은 수, 아직 가망이 있던 국면만. 최근 게임부터."""
+    out = []
+    for g in con.execute("SELECT * FROM games WHERE analyzed=1 ORDER BY end_time DESC"):
+        g = dict(g)
+        for p in con.execute("SELECT * FROM plies WHERE url=? AND mine=1 AND wp_loss>=20 ORDER BY ply", (g["url"],)):
+            p = dict(p)
+            if not p["best"] or p["cp_before"] < -300 or p["cp_before"] >= 9000:
+                continue
+            w = with_lines(con, dict(url=g["url"], date=g["date"], opp=g["opp"], color=g["my_color"], move=p["move"], mover=p["mover"],
+                                     san=p["san"], best=p["best"], cp_before=p["cp_before"], cp_after=p["cp_after"], wp_loss=p["wp_loss"],
+                                     clock=p["clock"], phase=p["phase"], fen=p["fen"]))
+            w["id"] = f"{game_id(g['url'])}-{p['ply']}"
+            w["ply"] = p["ply"]
+            out.append(w)
+        if len(out) >= limit:
+            break
+    json.dump(out[:limit], open(os.path.join(DOCS, "puzzles.json"), "w"), ensure_ascii=False, separators=(",", ":"))
+    return len(out[:limit])
+
+
 def render_all(con, cfg):
-    from render import render_html
+    """통계 JSON 과 기물 스프라이트를 docs/ 에 쓴다. HTML/CSS/JS 는 docs/ 의 정적 파일."""
+    from render import write_pieces
     now = datetime.now(KST)
     windows = {
         "all": compute_stats(load_games(con), con),
         "30d": compute_stats(load_games(con, int((now - timedelta(days=30)).timestamp())), con),
         "7d": compute_stats(load_games(con, int((now - timedelta(days=7)).timestamp())), con),
     }
-    payload = dict(username=cfg["CHESSCOM_USERNAME"], generated=now.strftime("%Y-%m-%d %H:%M"), windows=windows)
+    payload = dict(username=cfg["CHESSCOM_USERNAME"], generated=now.strftime("%Y-%m-%d %H:%M"),
+                   meta=dict(depth=DEPTH, pv_depth=LINE_DEPTH), windows=windows)
     os.makedirs(DOCS, exist_ok=True)
     json.dump(payload, open(os.path.join(DOCS, "stats.json"), "w"), ensure_ascii=False)
-    open(os.path.join(DOCS, "index.html"), "w", encoding="utf-8").write(render_html(payload))
+    write_pieces(DOCS)
+    n = export_puzzles(con)
     open(os.path.join(DOCS, ".nojekyll"), "w").write("")
     open(os.path.join(DOCS, ".code-hash"), "w").write(code_hash())
-    from render import render_game_page
-    open(os.path.join(DOCS, "game.html"), "w", encoding="utf-8").write(render_game_page())
-    log("대시보드 생성: docs/index.html, docs/game.html")
+    log(f"통계 생성: docs/stats.json, 퍼즐 {n}개")
 
 
 def main():
@@ -1182,8 +1332,11 @@ def main():
         if new:
             log(f"새 래피드 게임 {len(new)}판")
         new_done = analyze_pending(con, cfg)
+        if new_done:
+            con.commit()
+            con.execute("VACUUM")   # 커밋되는 DB 파일을 작게 유지
     pending_notify = [dict(r) for r in con.execute("SELECT * FROM games WHERE analyzed=1 AND notified=0")]
-    index = os.path.join(DOCS, "index.html")
+    index = os.path.join(DOCS, "stats.json")
     code_changed = os.path.exists(index) and _read_code_hash() != code_hash()
     if code_changed:
         log("코드가 바뀌어 대시보드를 다시 만듭니다")

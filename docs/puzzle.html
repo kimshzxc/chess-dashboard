@@ -4,19 +4,18 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
-<title>게임 분석</title>
+<title>오늘의 퍼즐</title>
 <link rel="stylesheet" href="style.css">
-<link rel="stylesheet" href="game.css">
+<link rel="stylesheet" href="puzzle.css">
 </head>
 <body>
 <header>
   <div class="top"><a href="index.html" class="btn">← 대시보드</a><span class="btn" id="tbtn">🎨 테마</span></div>
   <div id="tpanel-slot"></div>
-  <div id="head"></div>
 </header>
 <main id="main"><div class="empty">불러오는 중…</div></main>
-<footer id="foot"></footer>
+<footer class="sub" style="text-align:center;margin-top:24px">퍼즐은 내 게임에서 승률 20%p 이상 잃은 수의 국면입니다. 정답은 스톡피시의 최선 수 하나이며, 비슷하게 좋은 다른 수는 오답으로 처리됩니다.</footer>
 <script src="shared.js"></script>
-<script type="module" src="game.js"></script>
+<script type="module" src="puzzle.js"></script>
 </body>
 </html>
