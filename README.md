@@ -6,33 +6,44 @@
 
 | 파일 | 역할 |
 |---|---|
-| `pipeline.py` | 수집 → 분석 → 통계 → 대시보드 생성 → 알림 → GitHub 업로드 (크론이 실행) |
+| `pipeline.py` | 수집 → 분석 → 수순·퍼즐·통계 생성 → 알림. 로컬 파일만 갱신하고, 저장소에 올리는 일은 워크플로가 한다 |
 | `render.py` | 기물 SVG 세트를 `docs/pieces.svg` 로 묶기 |
 | `docs/*.html, *.js, *.css` | 대시보드·게임 분석·퍼즐 페이지 (정적 파일, 직접 수정) |
 | `tests/` | 스모크 테스트 (`python -m unittest discover -s tests`) |
-| `setup.sh` | 새 환경 초기 설치 (venv, 스톡피시, 크론) |
+| `setup.sh` | 로컬 시험용 초기 설치 (venv, 스톡피시). 크론은 `--cron` 을 줄 때만 |
 | `import_existing.py` | 예전 분석 결과를 DB로 가져오기 (1회용) |
 | `check_env.sh` | `.env` 값과 토큰/알림 연결 확인 |
-| `.env` | 사용자명, GitHub 토큰, ntfy 주제 (git에 올라가지 않음) |
+| `.env` | 사용자명, GitHub 토큰, ntfy 주제 (git에 올라가지 않음). 토큰은 `tools/` 스크립트만 쓴다 |
 | `data/chess.db` | 모든 게임과 수별 분석 결과 (SQLite). 이 파일만 복사하면 이식 완료 |
 | `docs/stats.json`, `docs/puzzles.json`, `docs/games/` | 파이프라인이 생성하는 데이터. GitHub Pages가 `docs/` 를 서비스 |
-| `.github/workflows/pipeline.yml` | GitHub Actions 감시 루프 (서버에서 1분마다 새 게임 확인) |
-| `logs/cron.log` | 실행 기록 |
+| `.github/workflows/pipeline.yml` | GitHub Actions 감시 루프 (서버에서 1분마다 새 게임 확인, 커밋, 배포 확인 뒤 알림) |
+| `.github/workflows/watchdog.yml` | 감시 루프가 살아 있는지 30분마다 확인하고 없으면 다시 띄움 |
+| `tools/gh_push.py`, `tools/gh_pull.py` | git 없이 저장소에 올리고 받아오기 |
+| `tests/ui_check.py` | 화면을 실제로 눌러 보는 점검 (헤드리스 크롬) |
+| `logs/cron.log` | 로컬 크론을 쓸 때의 실행 기록 (Actions 의 기록은 저장소 Actions 탭) |
 
 ## 명령
 
 ```
-./venv/bin/python pipeline.py               # 전체 실행
-./venv/bin/python pipeline.py --render-only # 대시보드만 다시 만들어 업로드
-./venv/bin/python pipeline.py --no-push --no-notify   # 로컬 테스트
-tail -f logs/cron.log                       # 크론 로그 보기
+./venv/bin/python tools/gh_pull.py                       # 저장소의 최신 DB·통계를 로컬로 받아오기 (시험 전에)
+./venv/bin/python pipeline.py --render-only              # 로컬에서 통계만 다시 생성 (사이트는 바뀌지 않음)
+./venv/bin/python pipeline.py --weekly-dry               # 주간 요약 문장 미리 보기
+./venv/bin/python -m unittest discover -s tests          # 스모크 테스트
+./venv/bin/python tools/gh_push.py --changed             # 로컬과 저장소가 다른 파일 보기
+./venv/bin/python tools/gh_push.py -m "메시지" 파일...    # 고친 파일을 커밋 하나로 올리기
 ```
+
+사이트에 반영하려면 고친 파일을 저장소에 올리면 된다. 화면 파일(`docs/*.html, *.js, *.css`)은 올리는 즉시,
+`pipeline.py` 는 감시 루프가 5분 안에 받아 다음 실행부터 쓴다.
 
 ## 화면 구성
 
 - 하단 탭바로 홈(레이팅·보완점) / 게임 / 복기(큰 실수·유형별·오프닝) / 퍼즐 / 통계(시간·틸트·국면)를 오갑니다. 주소의 `#games` 등으로 탭이 유지됩니다.
 - 기본은 짙은 톤이고, 테마 버튼의 "화면"에서 밝은 톤으로 바꿀 수 있습니다 (기기에 저장). 색·간격 토큰은 `docs/style.css` 맨 위에 있습니다.
-- 게임 페이지는 보드와 수 스트립이 화면 위에 고정되고, 퍼즐은 연속 풀이 일수와 최근 7일 기록을 기기에 저장합니다.
+- 게임 페이지는 보드와 수 스트립이 화면 위에 고정되고, 평가 그래프 아래에 나와 상대의 남은 시간 그래프가 있습니다.
+- 퍼즐은 하루 10문제가 그날 고정되고, 틀린 문제는 1일·3일·7일 뒤 복습으로 다시 나옵니다. 진행·연속 일수·복습 일정은 기기에 저장합니다.
+- 홈 화면에 추가하면 앱처럼 전체 화면으로 뜹니다 (`manifest.webmanifest`, `sw.js`). 온라인이면 항상 최신 파일을 받고, 오프라인이면 마지막 화면을 보여 줍니다.
+- 그래프는 누르면 값이 뜨고, 그래프 밖을 누르면 사라집니다.
 
 ## GitHub Actions 운영 (기본)
 
@@ -40,30 +51,34 @@ tail -f logs/cron.log                       # 크론 로그 보기
 
 - 한 번 실행되면 약 5시간 45분 동안 **1분마다** 새 게임을 확인하고, 끝나기 전에 다음 실행을 스스로 예약합니다. 게임이 끝나면 보통 1~2분 안에 분석·알림·대시보드 갱신이 됩니다.
 - 1분 확인은 1KB 짜리 플레이어 통계 API 로 마지막 게임 시각만 보고(`--quick`), 10분에 한 번 월간 기보 전체를 받아 보완합니다.
-- 30분 간격 스케줄은 체인이 끊겼을 때(오류, GitHub 장애) 다시 시작하는 안전망입니다. 실행 중이면 대기열에만 쌓이고 겹치지 않습니다.
+- `watchdog.yml` 이 30분마다 감시 실행이 살아 있는지 보고, 없으면(오류, GitHub 장애) 다시 띄웁니다.
+- 알림은 커밋·푸시 뒤 그 게임 페이지가 GitHub Pages 에 배포된 것을 확인하고 보냅니다. 그래서 알림을 누르면 바로 열립니다.
+- 월요일 9시 이후 첫 실행에서 지난주 요약 알림을 한 번 보냅니다.
 - 저장소 Settings → Secrets and variables → Actions 에 `CHESSCOM_USERNAME`, `NTFY_TOPIC` 두 개가 있어야 합니다.
 - `data/chess.db` 와 `docs/` 는 새 게임이 분석될 때마다 저장소에 커밋됩니다 (커밋 전 VACUUM). 스톡피시는 첫 실행 때 내려받아 캐시합니다.
-- 실행이 실패하면 ntfy 로 알림이 오고 30분 뒤 자동 재시도합니다. 연속 실패는 한 번만 알립니다.
+- 실행이 실패하면 ntfy 로 알림이 오고 watchdog 이 30분 안에 다시 띄웁니다. 연속 실패는 한 번만 알립니다.
 - 알림에는 결정적 실수 국면의 보드 이미지가 붙고, 누르면 그 장면의 게임 페이지가 열립니다.
 - 코드를 고치면 `pipeline.py`, `render.py` 를 커밋하기만 하면 됩니다. 실행 중인 루프가 5분마다 저장소를 당겨오고 `docs/.code-hash` 로 변경을 감지해 대시보드를 다시 만듭니다. 워크플로 파일 자체의 변경은 다음 실행부터 적용됩니다.
-- Actions 탭 → chess pipeline → Run workflow 로 수동 실행할 수 있습니다. "대시보드만 다시 생성"은 진행 중인 감시가 끝난 뒤에야 실행되므로, 보통은 코드만 커밋하는 편이 빠릅니다.
-- 로컬에서도 돌릴 수는 있지만, Actions 와 동시에 돌리면 DB 가 갈라지므로 둘 중 하나만 쓰세요. 로컬에서 쓰려면 먼저 저장소에서 최신 `data/chess.db` 를 받아오세요.
-- 공개 저장소라 Actions 사용량은 무료지만, 러너를 상시 점유하는 방식이라 GitHub 약관상 회색 지대입니다. 문제가 되면 워크플로의 `WATCH_MINUTES` 를 줄이고 스케줄을 `*/5` 로 바꾸면 평범한 주기 실행이 됩니다.
+- 워크플로 파일을 고친 뒤 바로 적용하려면 Actions 탭에서 진행 중인 chess pipeline 실행을 취소하세요. watchdog 이 새 정의로 다시 띄웁니다 (바로 띄우려면 Run workflow).
+- 로컬 실행은 로컬 파일만 바꾸고 저장소에는 아무것도 올리지 않습니다. 다만 `--render-only` 없이 돌리면 새 게임을 분석해 알림을 한 번 더 보내니, 시험할 때는 `--no-notify` 를 붙이세요.
+- 공개 저장소라 Actions 사용량은 무료지만, 러너를 상시 점유하는 방식이라 GitHub 약관상 회색 지대입니다. 문제가 되면 `WATCH_MINUTES` 를 3 정도로 줄이고 watchdog 의 스케줄을 5분 간격으로 바꾸면 평범한 주기 실행이 됩니다.
 
-## 다른 컴퓨터로 옮기기
+## 다른 컴퓨터에서 고치기
 
-1. 이 폴더 전체(`venv/`, `engine/` 제외 가능)를 복사
-2. `bash setup.sh` 실행 (venv, 스톡피시 다운로드, 크론 등록)
-3. `.env` 채우기 → `bash check_env.sh` 로 확인
-4. `./venv/bin/python pipeline.py`
+운영은 GitHub Actions 가 하므로 옮길 것은 없다. 다른 컴퓨터에서 코드를 고치거나 시험하려면:
 
-`data/chess.db` 를 함께 복사하면 기존 분석을 다시 돌리지 않습니다.
+1. 저장소를 내려받고(git clone 또는 zip) `.env` 를 채운다 → `bash check_env.sh` 로 확인
+2. `bash setup.sh` (venv, 의존성, 스톡피시)
+3. `./venv/bin/python tools/gh_pull.py` 로 최신 DB 를 받는다
+4. 고친 뒤 `tools/gh_push.py` 로 올린다 (git 이 있으면 평소처럼 commit/push 해도 된다)
 
 ## 분석 기준
 
 - Stockfish 19, depth 18, 모든 수 평가. 깊이를 바꾸면 기존 게임은 실행마다 15판씩 자동으로 다시 분석됩니다 (`games.depth` 열로 추적)
+- 실수 국면(승률 20%p 이상 또는 3점 이상 손해)마다 같은 깊이로 상위 4수를 함께 계산합니다 (`lines` 테이블). 정답 수순은 저장된 최선 수로 시작하고, 최선과 승률 차이가 5%p 안인 수는 같이 좋은 수로 기록합니다
 - 대실수: 100분율 승률 기준이 아닌 센티폰 300 이상 손실. 실수: 100~299. 정확도: 리체스 공식
 - 기물 방치: 내 수 다음 상대 최선수가 내 기물(폰 제외)을 잡는 경우
 - 오프닝 = 1~10수, 엔드게임 = 폰과 킹 제외 기물 가치 합 14 이하
 - 세션 = 게임 사이 간격 30분 이내. 틸트 통계는 같은 세션 안의 직전 결과·연패만 봅니다
-- 퍼즐 = 내 수 중 승률 20%p 이상 잃은 국면 (이미 -3 이하로 진 국면 제외), 최근 200개
+- 퍼즐 = 내 수 중 승률 20%p 이상 잃은 국면 (이미 -3 이하로 진 국면 제외), 최근 200개. 같이 좋은 수도 정답으로 인정하고, 좋은 수가 4개 이상이거나 분석이 엇갈리는 국면은 뺍니다
+- 보완점 중 다른 집단과 비교해서 나온 것(오프닝, 틸트, 긴 세션, 시간 압박, 엔드게임, 20수 시계)은 검정을 해서 p가 0.1 이상이면 "표본 부족"으로 낮춰 뒤에 보여 줍니다

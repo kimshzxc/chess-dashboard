@@ -1,10 +1,10 @@
 /* ---------- 디자인 토큰: 기본은 짙은 톤, data-mode="light" 로 밝은 톤 ---------- */
-@import url("https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css");
 :root{
   color-scheme:dark;
   --bg:#0e1014;--bg2:#13161c;--surface:#181c23;--surface2:#1f242d;--line:#262c36;--line2:#303744;
   --text:#f3f4f6;--text2:#aeb4bf;--muted:#6f7684;
   --me:#5b9bff;--me-ink:#7fb3ff;--me-soft:rgba(91,155,255,.16);--opp:#ff8a4c;
+  --s1:#4a90f0;--s2:#e0662e;   /* 차트 계열색 (나, 상대). 강조색보다 한 단계 어둡게: 짙은 바탕에서 검증기 통과 */
   --good:#3ad07f;--warning:#f3c247;--serious:#ff8a4c;--critical:#ff5c5c;
   --win:#3ad07f;--loss:#ff5c5c;--draw:#8a92a0;
   --sq-l:#C8AA77;--sq-d:#815A37;--sq-hl:rgba(255,255,51,.5);
@@ -20,6 +20,7 @@
   --bg:#f4f5f7;--bg2:#eef0f3;--surface:#ffffff;--surface2:#f6f7f9;--line:#e5e8ee;--line2:#d9dee6;
   --text:#14171c;--text2:#4b5361;--muted:#8a92a0;
   --me:#2a6ef5;--me-ink:#2a6ef5;--me-soft:rgba(42,110,245,.12);--opp:#f07a3a;
+  --s1:#2a6ef5;--s2:#de5f24;
   --good:#1db860;--warning:#d9a400;--serious:#f07a3a;--critical:#e03b3b;
   --win:#1db860;--loss:#e03b3b;--draw:#8a92a0;
   --shadow:0 1px 2px rgba(16,24,40,.04),0 10px 30px rgba(16,24,40,.07);
@@ -65,8 +66,8 @@ header>*{max-width:720px;margin-left:auto;margin-right:auto}
 .res{width:44px;height:44px;border-radius:50%;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:15px;flex:none;letter-spacing:-.02em}
 .res.W{background:var(--win);color:#06200f}.res.L{background:var(--loss)}.res.D{background:var(--draw);color:#111}
 /* 하단 탭바 */
-.tabbar{position:fixed;left:0;right:0;bottom:0;z-index:6;display:flex;justify-content:space-around;align-items:stretch;background:color-mix(in srgb,var(--bg2) 90%,transparent);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-top:1px solid var(--line);padding:6px 8px calc(6px + env(safe-area-inset-bottom,0px))}
-.tabbar a{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;color:var(--muted);font-size:11px;font-weight:600;min-height:48px;border-radius:12px;-webkit-tap-highlight-color:transparent;transition:color .15s}
+.tabbar{position:fixed;left:0;right:0;bottom:0;z-index:6;display:flex;justify-content:center;align-items:stretch;background:color-mix(in srgb,var(--bg2) 90%,transparent);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-top:1px solid var(--line);padding:6px 8px calc(6px + env(safe-area-inset-bottom,0px))}
+.tabbar a{flex:1;max-width:150px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;color:var(--muted);font-size:11px;font-weight:600;min-height:48px;border-radius:12px;-webkit-tap-highlight-color:transparent;transition:color .15s}
 .tabbar a svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
 .tabbar a.on{color:var(--me-ink)}
 .tabbar a:active{background:var(--surface2)}
@@ -97,6 +98,7 @@ header>*{max-width:720px;margin-left:auto;margin-right:auto}
 .sw i b{display:block}
 .sw svg{width:26px;height:26px}
 .sw.mode{padding:0 14px}
+.tpanel .note{font-size:12.5px;color:var(--muted);line-height:1.5}
 /* 스켈레톤 로딩 */
 .sk{border-radius:var(--r);background:linear-gradient(90deg,var(--surface) 25%,var(--surface2) 50%,var(--surface) 75%);background-size:200% 100%;animation:shimmer 1.4s infinite}
 @keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
@@ -104,3 +106,13 @@ header>*{max-width:720px;margin-left:auto;margin-right:auto}
 @keyframes pop{0%{transform:scale(.96);opacity:.6}100%{transform:scale(1);opacity:1}}
 main>section{animation:fade .25s ease both}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+/* 선 그래프 공용 (추이·레이팅·시계): 크로스헤어와 툴팁 */
+.tchart-wrap{position:relative}
+.tchart{width:100%;height:auto;display:block;touch-action:pan-y;-webkit-tap-highlight-color:transparent}
+.tchart text{font-family:inherit}
+.tip{position:absolute;top:2px;left:50%;transform:translateX(-50%);background:var(--text);color:var(--bg);font-size:12.5px;font-weight:600;padding:5px 10px;border-radius:8px;white-space:nowrap;pointer-events:none;display:none;box-shadow:var(--shadow-sm)}
+.tip.on{display:flex;gap:10px;align-items:center}
+.tip .hd{font-weight:500;opacity:.75}
+.tip .row{display:inline-flex;align-items:center;gap:5px}
+.tip .row i{display:inline-block;width:12px;height:3px;border-radius:2px}
+.tip .row small{font-weight:500;opacity:.75;font-size:11.5px}

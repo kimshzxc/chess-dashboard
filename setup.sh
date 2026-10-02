@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# 새 컴퓨터/서버에서 처음 한 번 실행: venv, python-chess, 스톡피시 다운로드, 크론 등록.
+# 로컬에서 시험하려고 처음 한 번 실행: venv, 의존성, 스톡피시 다운로드.
+# 평소 운영은 GitHub Actions 가 한다. 이 컴퓨터에서 직접 돌리려면 --cron 을 붙인다 (Actions 와 동시에 쓰면 알림이 두 번 온다).
 set -e
 cd "$(dirname "$0")"
 
 echo "== 1. Python 가상환경 =="
 [ -d venv ] || python3 -m venv venv
-./venv/bin/pip install --quiet --upgrade pip chess
+./venv/bin/pip install --quiet --upgrade pip
+./venv/bin/pip install --quiet -r requirements.txt
 
 echo "== 2. 스톡피시 =="
 mkdir -p engine
@@ -39,9 +41,14 @@ EOF
 fi
 echo "  .env 있음"
 
-echo "== 4. 크론 등록 (10분마다) =="
-job="*/10 * * * * cd $PWD && ./venv/bin/python pipeline.py >> logs/cron.log 2>&1"
 mkdir -p logs data docs
-{ crontab -l 2>/dev/null | grep -v 'chess-dashboard/venv/bin/python pipeline.py' || true; echo "$job"; } | crontab -
-crontab -l | grep pipeline.py
-echo "완료. 첫 실행: ./venv/bin/python pipeline.py"
+if [ "${1:-}" = "--cron" ]; then
+  echo "== 4. 크론 등록 (10분마다) =="
+  echo "  주의: GitHub Actions 감시를 켜 둔 채로 쓰면 같은 게임 알림이 두 번 옵니다."
+  job="*/10 * * * * cd $PWD && ./venv/bin/python pipeline.py >> logs/cron.log 2>&1"
+  { crontab -l 2>/dev/null | grep -v 'chess-dashboard/venv/bin/python pipeline.py' || true; echo "$job"; } | crontab -
+  crontab -l | grep pipeline.py
+else
+  echo "== 4. 크론은 등록하지 않았습니다 (운영은 GitHub Actions). 이 컴퓨터에서 돌리려면: bash setup.sh --cron =="
+fi
+echo "완료. 최신 데이터 받기: ./venv/bin/python tools/gh_pull.py   로컬 시험: ./venv/bin/python pipeline.py --render-only"

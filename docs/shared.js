@@ -67,7 +67,7 @@ function themePanel(){
   for(const [k,b] of Object.entries(BOARDS)) h+=`<span class="sw" data-board="${k}"><i><b style="background:${b.l}"></b><b style="background:${b.d}"></b><b style="background:${b.d}"></b><b style="background:${b.l}"></b></i>${b.name}</span>`;
   h+=`</div><div class="lab">기물</div><div class="row">`;
   for(const [k,n] of Object.entries(PSETS)) h+=`<span class="sw" data-pieces="${k}"><svg viewBox="0 0 100 100"><use href="#${k}-wN" width="100" height="100"/></svg>${n}</span>`;
-  return h+`</div><div class="lab">체스닷컴 Neo 기물은 저작권 때문에 그대로 넣을 수 없어, 가장 비슷한 무료 세트(마에스트로)를 기본으로 씁니다. 나무 판 색은 체스닷컴 Dark Wood 판에서 추출했습니다.</div></div>`;
+  return h+`</div><div class="note">체스닷컴 Neo 기물은 저작권 때문에 그대로 넣을 수 없어, 가장 비슷한 무료 세트(마에스트로)를 기본으로 씁니다. 나무 판 색은 체스닷컴 Dark Wood 판에서 추출했습니다.</div></div>`;
 }
 document.addEventListener('click',(e)=>{
   const tb=e.target.closest('#tbtn'); if(tb){ $('#tpanel').classList.toggle('open'); return; }
@@ -149,3 +149,35 @@ function blunderViewer(w){
   }
   return viewer({flip,lines});
 }
+
+/* ---------- 선 그래프 크로스헤어·툴팁 (세 페이지 공용) ----------
+   CHARTS[svg id] = {N, L, pw, W, x(i), ys(i,k), tip(i), pick?(i)}
+   tip(i) 는 문자열, 또는 {head, rows:[{c:색, k:계열 이름, v:값}]}. 값은 textContent 로만 넣는다. */
+const CHARTS={};
+function chartHide(svg){ const g=svg.querySelector('.xc'); if(g) g.style.display='none'; const tip=svg.parentElement.querySelector('.tip'); if(tip) tip.classList.remove('on'); }
+function chartShow(svg,i){
+  const C=CHARTS[svg.id]; if(!C) return;
+  const g=svg.querySelector('.xc'); if(!g) return; g.style.display=''; const X=C.x(i).toFixed(1);
+  const l=g.querySelector('.xc-l'); l.setAttribute('x1',X); l.setAttribute('x2',X);
+  g.querySelectorAll('.xc-d').forEach((d,k)=>{ const y=C.ys(i,k); if(y==null){ d.style.display='none'; } else { d.style.display=''; d.setAttribute('cx',X); d.setAttribute('cy',y.toFixed(1)); } });
+  const tip=svg.parentElement.querySelector('.tip'); const t=C.tip(i); tip.replaceChildren();
+  if(typeof t==='string') tip.textContent=t;
+  else { const hd=document.createElement('span'); hd.className='hd'; hd.textContent=t.head; tip.append(hd);
+    for(const r of t.rows){ const row=document.createElement('span'); row.className='row'; const key=document.createElement('i'); key.style.background=r.c;
+      const val=document.createElement('b'); val.textContent=r.v; const nm=document.createElement('small'); nm.textContent=r.k; row.append(key,val,nm); tip.append(row); } }
+  tip.classList.add('on');
+}
+function chartMove(e){
+  const svg=e.target.closest&&e.target.closest('svg.xchart'); if(!svg) return; const C=CHARTS[svg.id]; if(!C) return;
+  const r=svg.getBoundingClientRect(); const px=(e.clientX-r.left)/r.width*C.W;
+  const i=Math.max(0,Math.min(C.N-1,Math.round((px-C.L)/C.pw*(C.N-1))));
+  chartShow(svg,i); if(e.type==='pointerdown'&&C.pick) C.pick(i);
+}
+document.addEventListener('pointermove',chartMove);
+document.addEventListener('pointerdown',chartMove);
+/* 터치: 누른 값이 손을 떼도 남고, 그래프 밖을 누르면 사라진다. 마우스: 그래프를 벗어나면 사라진다. */
+document.addEventListener('pointerdown',(e)=>{ const inside=e.target.closest&&e.target.closest('svg.xchart'); document.querySelectorAll('svg.xchart').forEach(s=>{ if(s!==inside) chartHide(s); }); });
+document.addEventListener('pointerout',(e)=>{ if(e.pointerType!=='mouse') return; const svg=e.target.closest&&e.target.closest('svg.xchart'); if(svg&&!(e.relatedTarget&&svg.contains(e.relatedTarget))) chartHide(svg); });
+
+/* ---------- 설치형 웹앱: 서비스 워커 (온라인이면 항상 최신, 오프라인이면 마지막으로 받은 화면) ---------- */
+if('serviceWorker' in navigator && window.isSecureContext){ navigator.serviceWorker.register('sw.js').catch(()=>{}); }

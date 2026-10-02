@@ -32,13 +32,9 @@ elif [[ "$code" == "401" ]]; then
   echo "  토큰 인증 실패: 토큰이 잘못 복사됐거나 만료됨"
 fi
 
-echo "== 3. 저장소 쓰기 테스트 (chess-dashboard-test.txt 파일 생성) =="
-content=$(printf 'dashboard setup test %s\n' "$(date -u +%FT%TZ)" | base64 -w0)
-wcode=$(curl -s -o /dev/null -w "%{http_code}" -X PUT \
-  -H "Authorization: Bearer $GITHUB_TOKEN" -H "Content-Type: application/json" \
-  "https://api.github.com/repos/$GITHUB_OWNER/$GITHUB_REPO/contents/chess-dashboard-test.txt" \
-  -d "{\"message\":\"setup test\",\"content\":\"$content\"}")
-echo "  HTTP $wcode  (201=새로 생성, 422=이미 있음, 403/404=쓰기 권한 없음)"
+echo "== 3. 저장소 쓰기 권한 =="
+echo "  위 2번의 'push 권한' 이 True 면 tools/gh_push.py 로 올릴 수 있습니다 (시험 파일은 만들지 않습니다)."
+echo "  워크플로 파일을 고쳐 올리려면 토큰에 Workflows 쓰기 권한도 필요합니다."
 
 echo "== 4. ntfy 알림 테스트 =="
 ncode=$(curl -s -o /dev/null -w "%{http_code}" -H "Title: 체스 대시보드" \

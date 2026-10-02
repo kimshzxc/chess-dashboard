@@ -55,19 +55,14 @@
 .verdict .ic{display:inline-block;margin-right:6px;vertical-align:2px}
 .tiles3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-bottom:12px}
 .tiles3 .tile{padding:12px}.tiles3 .tile .v{font-size:21px}
-.tchart-wrap{position:relative}
-.tchart{width:100%;height:auto;display:block;touch-action:pan-y}
-.tchart text{font-family:inherit}
-.tip{position:absolute;top:2px;left:50%;transform:translateX(-50%);background:var(--text);color:var(--bg);font-size:12.5px;font-weight:600;padding:5px 10px;border-radius:8px;white-space:nowrap;pointer-events:none;display:none;box-shadow:var(--shadow-sm)}
-.tip.on{display:block}
 .method{font-size:12.5px;color:var(--muted);line-height:1.5;margin-top:10px}
 /* 막대·표 */
 .legend{display:flex;gap:14px;font-size:13px;color:var(--text2);margin-bottom:10px;flex-wrap:wrap}
 .legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
 .bars{display:grid;grid-template-columns:auto 1fr;gap:8px 12px;align-items:center;font-size:13.5px}
 .bars .lbl{color:var(--text2);white-space:nowrap}
-.bar{height:10px;border-radius:0 5px 5px 0;background:linear-gradient(90deg,color-mix(in srgb,var(--me) 65%,transparent),var(--me));position:relative}
-.bar.opp{background:linear-gradient(90deg,color-mix(in srgb,var(--opp) 65%,transparent),var(--opp))}
+.bar{height:10px;border-radius:0 4px 4px 0;background:var(--s1);position:relative}
+.bar.opp{background:var(--s2)}
 .bar span{position:absolute;left:calc(100% + 6px);top:-5px;font-size:12.5px;color:var(--text);white-space:nowrap;font-weight:600}
 .bar span span{font-weight:400}
 .pair{display:flex;flex-direction:column;gap:3px;padding:1px 0}
@@ -106,3 +101,6 @@ td.n,th.n{text-align:right;white-space:nowrap}
 .sk-row{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:10px}
 .sk-row .sk{height:84px}
 .sk-card{height:120px;margin-top:12px}
+.weak.hint .t{color:var(--text2)}
+.weak.hint p{font-size:14px}
+.evnote{font-size:13px;color:var(--text2);background:var(--surface2);border-radius:10px;padding:9px 12px;margin-bottom:10px;line-height:1.5}

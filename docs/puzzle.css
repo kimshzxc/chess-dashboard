@@ -33,3 +33,7 @@ header{position:static;border-bottom:0;padding:calc(14px + env(safe-area-inset-t
 .done{text-align:center;padding:24px 0}
 .done .big{font-size:48px;font-weight:800;letter-spacing:-.03em}
 .viewer{max-width:440px;margin-left:auto;margin-right:auto}
+.task .rv{display:inline-block;font-size:11.5px;font-weight:700;padding:3px 8px;border-radius:999px;background:color-mix(in srgb,var(--warning) 22%,transparent);color:var(--warning);margin-right:8px;vertical-align:2px}
+.toast{max-width:440px;margin:8px auto 0;text-align:center;font-size:13.5px;font-weight:600;color:var(--warning);min-height:20px;opacity:0;transition:opacity .15s}
+.toast.on{opacity:1}
+.done .acts{margin-top:16px}

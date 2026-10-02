@@ -89,7 +89,6 @@ const fmtD=(t,d)=>{ const sg=d>0?'+':d<0?'−':'±'; const a=Math.abs(d);
   if(t.fmt==='pct') return sg+(a*100).toFixed(1)+'%p'; if(t.fmt==='pct100') return sg+a.toFixed(1)+'%p';
   if(t.fmt==='clock') return sg+fmtV(t,a); return sg+a.toFixed(t.fmt==='num1'?1:2); };
 const niceStep=(r)=>{ if(r<=0) return 1; const p=Math.pow(10,Math.floor(Math.log10(r))); const m=r/p; return (m<1.5?1:m<3.5?2:m<7.5?5:10)*p; };
-const CHARTS={};   // svg id → {N,L,pw,W,x,ys(i),tip(i)} 크로스헤어 툴팁용
 function trendChart(t){
   const N=t.series.length; if(N<2) return '';
   const W=360,H=180,L=46,R=14,T=16,B=34,pw=W-L-R,ph=H-T-B;
@@ -104,10 +103,10 @@ function trendChart(t){
   const id='tchart'; let h=`<div class="tchart-wrap"><svg class="tchart xchart" id="${id}" viewBox="0 0 ${W} ${H}">`;
   for(let v=lo;v<=hi+1e-9;v+=step){ h+=`<line x1="${L}" x2="${W-R}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" stroke="var(--line)" stroke-width="1"/><text x="${L-6}" y="${(y(v)+4).toFixed(1)}" font-size="11" text-anchor="end" fill="var(--muted)">${axisV(v)}</text>`; }
   if(t.k&&t.k<N){ const xs=x(N-t.k-0.5).toFixed(1); h+=`<line x1="${xs}" x2="${xs}" y1="${T}" y2="${T+ph}" stroke="var(--muted)" stroke-width="1"/><text x="${(+xs+4).toFixed(1)}" y="${T+10}" font-size="11" fill="var(--text2)">최근 ${t.k}판</text>`; }
-  h+=vals.map((v,i)=>`<circle cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="3" fill="var(--me)" opacity=".28"/>`).join('');
-  h+=`<path d="${roll.map((v,i)=>(i?'L':'M')+x(i).toFixed(1)+' '+y(v).toFixed(1)).join(' ')}" fill="none" stroke="var(--me)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+  h+=vals.map((v,i)=>`<circle cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="3" fill="var(--s1)" opacity=".28"/>`).join('');
+  h+=`<path d="${roll.map((v,i)=>(i?'L':'M')+x(i).toFixed(1)+' '+y(v).toFixed(1)).join(' ')}" fill="none" stroke="var(--s1)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
   h+=`<text x="${L}" y="${H-6}" font-size="11" fill="var(--muted)">${t.series[0][0]}</text><text x="${W-R}" y="${H-6}" font-size="11" text-anchor="end" fill="var(--muted)">${t.series[N-1][0]}</text><text x="${(L+pw/2).toFixed(1)}" y="${H-6}" font-size="11" text-anchor="middle" fill="var(--muted)">게임 순서 →</text>`;
-  h+=`<g class="xc" style="display:none"><line class="xc-l" y1="${T}" y2="${T+ph}" stroke="var(--text2)" stroke-width="1"/><circle class="xc-d" r="5" fill="var(--me)" stroke="var(--surface)" stroke-width="2"/></g>`;
+  h+=`<g class="xc" style="display:none"><line class="xc-l" y1="${T}" y2="${T+ph}" stroke="var(--text2)" stroke-width="1"/><circle class="xc-d" r="5" fill="var(--s1)" stroke="var(--surface)" stroke-width="2"/></g>`;
   h+=`</svg><div class="tip"></div></div>`;
   CHARTS[id]={N,L,pw,W,x,ys:i=>y(roll[i]),tip:i=>`${t.series[i][0]} · 이 판 ${fmtV(t,vals[i]/sc)} · 최근 ${win}판 평균 ${fmtV(t,roll[i]/sc)}`};
   return h;
@@ -123,13 +122,13 @@ function ratingChart(series){
   let h=`<div class="tchart-wrap"><svg class="tchart xchart" id="rchart" viewBox="0 0 ${W} ${H}">`;
   for(let v=lo;v<=hi+1e-9;v+=step) h+=`<line x1="${L}" x2="${W-R}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" stroke="var(--line)" stroke-width="1"/><text x="${L-6}" y="${(y(v)+4).toFixed(1)}" font-size="11" text-anchor="end" fill="var(--muted)">${Math.round(v)}</text>`;
   const line=vals.map((v,i)=>(i?'L':'M')+x(i).toFixed(1)+' '+y(v).toFixed(1)).join(' ');
-  h+=`<defs><linearGradient id="rgrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--me)" stop-opacity=".32"/><stop offset="1" stop-color="var(--me)" stop-opacity="0"/></linearGradient></defs>`;
+  h+=`<defs><linearGradient id="rgrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--s1)" stop-opacity=".32"/><stop offset="1" stop-color="var(--s1)" stop-opacity="0"/></linearGradient></defs>`;
   h+=`<path d="${line} L${x(N-1).toFixed(1)} ${T+ph} L${L} ${T+ph} Z" fill="url(#rgrad)"/>`;
-  h+=`<path d="${line}" fill="none" stroke="var(--me)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+  h+=`<path d="${line}" fill="none" stroke="var(--s1)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
   const rr=N>120?1.9:N>60?2.6:3.6;
   h+=series.map((s,i)=>`<circle cx="${x(i).toFixed(1)}" cy="${y(s[1]).toFixed(1)}" r="${rr}" fill="${col[s[2]]||col.D}"/>`).join('');
   h+=`<text x="${L}" y="${H-6}" font-size="11" fill="var(--muted)">${series[0][0]}</text><text x="${W-R}" y="${H-6}" font-size="11" text-anchor="end" fill="var(--muted)">${series[N-1][0]}</text>`;
-  h+=`<g class="xc" style="display:none"><line class="xc-l" y1="${T}" y2="${T+ph}" stroke="var(--text2)" stroke-width="1"/><circle class="xc-d" r="5" fill="var(--me)" stroke="var(--surface)" stroke-width="2"/></g>`;
+  h+=`<g class="xc" style="display:none"><line class="xc-l" y1="${T}" y2="${T+ph}" stroke="var(--text2)" stroke-width="1"/><circle class="xc-d" r="5" fill="var(--s1)" stroke="var(--surface)" stroke-width="2"/></g>`;
   h+=`</svg><div class="tip"></div></div>`;
   const nm={W:'승',L:'패',D:'무'};
   CHARTS.rchart={N,L,pw,W,x,ys:i=>y(vals[i]),tip:i=>`${series[i][0]} · ${series[i][1]} · ${nm[series[i][2]]||''}`};
@@ -138,6 +137,7 @@ function ratingChart(series){
 function trendView(w){
   const t=w.trend; if(!t) return '<div class="empty">추이 데이터가 없습니다.</div>';
   let h=`<div class="sub" style="margin-bottom:10px">지표: <b>${esc(t.label)}</b> · ${t.lower_better?'낮을수록 좋음':'높을수록 좋음'} · 이 기간 ${t.n}판 기준</div>`;
+  if(w.ev&&!w.ev.confident) h+=`<div class="evnote">이 보완점은 아직 가설입니다. 근거가 ${w.ev.n}${esc(w.ev.unit)}뿐이라 평소와의 차이가 우연일 수 있습니다${w.ev.p!=null?` (p=${w.ev.p.toFixed(2)})`:''}. 판이 더 쌓이면 다시 판단합니다.</div>`;
   if(t.status==='insufficient'){
     h+=`<div class="verdict"><span class="ic">판단 보류</span>해당 게임이 ${t.n}판뿐이라 추이를 판단할 수 없습니다. 10판 이상 쌓이면 분석합니다.</div>`;
     if(t.series.length>=2) h+=`<div class="card">${trendChart(t)}</div>`;
@@ -177,15 +177,6 @@ document.addEventListener('click',(e)=>{
   if(e.target.closest('#sheet-x')||e.target===$('#sheet')) closeSheet();
 });
 document.addEventListener('keydown',(e)=>{ if(e.key==='Escape') closeSheet(); });
-function tcMove(e){
-  const svg=e.target.closest('svg.xchart'); if(!svg) return; const C=CHARTS[svg.id]; if(!C) return;
-  const r=svg.getBoundingClientRect(); const px=(e.clientX-r.left)/r.width*C.W;
-  const i=Math.max(0,Math.min(C.N-1,Math.round((px-C.L)/C.pw*(C.N-1))));
-  const g=svg.querySelector('.xc'); g.style.display=''; const X=C.x(i).toFixed(1);
-  const l=svg.querySelector('.xc-l'), d=svg.querySelector('.xc-d'); l.setAttribute('x1',X); l.setAttribute('x2',X); d.setAttribute('cx',X); d.setAttribute('cy',C.ys(i).toFixed(1));
-  const tip=svg.parentElement.querySelector('.tip'); tip.textContent=C.tip(i); tip.classList.add('on');
-}
-document.addEventListener('pointerleave',(e)=>{ const svg=e.target&&e.target.closest&&e.target.closest('svg.xchart'); if(!svg) return; const g=svg.querySelector('.xc'); if(g) g.style.display='none'; const tip=svg.parentElement.querySelector('.tip'); if(tip) tip.classList.remove('on'); },true);
 
 function spark(evals, worstPly){
   if(!evals||evals.length<2) return '';
@@ -194,7 +185,7 @@ function spark(evals, worstPly){
   const d=pts.map((p,i)=>(i?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' ');
   const area=`M0 ${mid} `+pts.map(p=>'L'+p[0].toFixed(1)+' '+p[1].toFixed(1)).join(' ')+` L${W} ${mid} Z`;
   let dot=''; if(worstPly!=null&&worstPly<n){ const p=pts[worstPly]; dot=`<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="3.5" fill="${RED}"/>`; }
-  return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><line x1="0" y1="${mid}" x2="${W}" y2="${mid}" stroke="var(--line)"/><path d="${area}" fill="var(--me)" opacity=".18"/><path d="${d}" fill="none" stroke="var(--me)" stroke-width="1.5"/>${dot}</svg>`;
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><line x1="0" y1="${mid}" x2="${W}" y2="${mid}" stroke="var(--line)"/><path d="${area}" fill="var(--s1)" opacity=".14"/><path d="${d}" fill="none" stroke="var(--s1)" stroke-width="1.5"/>${dot}</svg>`;
 }
 function bars(rows, max){
   let h='<div class="bars">';
@@ -209,7 +200,7 @@ function bars(rows, max){
   }
   return h+'</div>';
 }
-const legend = ()=>`<div class="legend"><span><i style="background:var(--me)"></i>나</span><span><i style="background:var(--opp)"></i>상대</span></div>`;
+const legend = ()=>`<div class="legend"><span><i style="background:var(--s1)"></i>나</span><span><i style="background:var(--s2)"></i>상대</span></div>`;
 
 /* 화면(탭): 홈 / 게임 / 복기 / 통계. 주소의 #games 등으로 유지된다 */
 const VIEWS=['home','games','mistakes','stats'];
@@ -253,7 +244,7 @@ function render(){
   </section>`;
   h+=`<section id="s-weak" data-view="home"><h2>보완점<small>통계에서 자동 추출</small></h2>`;
   if(!S.weaknesses.length) h+='<div class="empty">두드러진 약점이 없습니다.</div>';
-  for(const w of S.weaknesses){ const ic={critical:'중요',serious:'주의',warning:'참고',good:'강점'}[w.level]||'';
+  for(const w of S.weaknesses){ const ic={critical:'중요',serious:'주의',warning:'참고',good:'강점',hint:'표본 부족'}[w.level]||'';
     h+=`<div class="card weak ${w.level}" data-weak="${S.weaknesses.indexOf(w)}"><div class="t"><span class="ic">${ic}</span>${esc(w.title)}</div><p>${esc(w.text)}</p><div class="go">추이 분석 ›</div></div>`; }
   h+='</section>';
   // 최근 게임

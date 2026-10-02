@@ -28,6 +28,8 @@ function renderMain(){
   h+=`<div class="opts"><span class="btn ${SHOW_BEST?'on':''}" id="optbest">정답 화살표</span><span class="btn" id="optflip">판 뒤집기</span></div>`;
   h+=`<div class="info card" id="info"></div>`;
   h+=`<div class="card"><div class="sub">평가 그래프 (누르면 이동 · 점: 실수/대실수)</div>${graphSVG()}</div>`;
+  const cs=clockSVG();
+  if(cs) h+=`<div class="card"><div class="sub">남은 시간 (누르면 그 수로 이동)</div>${cs}<div class="legend"><span><i class="lk" style="background:var(--s1)"></i>나</span><span><i class="lk" style="background:var(--s2)"></i>상대</span><span><i class="dotk"></i>내가 45초 이상 쓴 수</span></div></div>`;
   const cnt=(who)=>{ const c={best:0,good:0,inacc:0,mist:0,blun:0}; G.plies.forEach(p=>{ if(p.mine===who){ const k=p.cls==='miss'?'blun':p.cls; c[k]=(c[k]||0)+1; } }); return c; };
   const cm=cnt(1), co=cnt(0);
   h+=`<div class="tiles">
@@ -51,6 +53,38 @@ function renderMain(){
   h+=`</div></div>`;
   $('#main').innerHTML=h;
   $('#foot').textContent=`Stockfish 19 depth ${G.depth||14} · 정답 수순 depth ${G.pv_depth||16}`;
+}
+/* 남은 시간 그래프: 나와 상대의 시계를 수 순서로. 가장 큰 약점이 시간 관리라서 어디서 시간을 썼는지 보이게 한다. */
+let CLK=null;   // {L,pw,n} 현재 수 표시선 위치 계산용
+function clockSVG(){
+  const n=G.plies.length; if(n<2||!G.plies.some(p=>p.clock!=null)) return '';
+  const W=360,H=150,L=40,R=46,T=12,B=22,pw=W-L-R,ph=H-T-B;
+  const first=(mine)=>{ const p=G.plies.find(q=>!!q.mine===mine&&q.clock!=null); return p?p.clock+(p.spent||0):null; };
+  let cm=first(true), co=first(false); const me=[cm], op=[co];   // 0 = 시작, i = i번째 수를 둔 뒤. 자기 차례가 아닐 때는 직전 값 유지
+  G.plies.forEach(p=>{ if(p.clock!=null){ if(p.mine) cm=p.clock; else co=p.clock; } me.push(cm); op.push(co); });
+  const all=[...me,...op].filter(v=>v!=null); if(all.length<4) return '';
+  const top=Math.max(60,Math.ceil(Math.max(...all)/60)*60), step=top>=600?300:top>=240?120:60;
+  const x=i=>L+i/n*pw, y=v=>T+(1-v/top)*ph;
+  const path=(a)=>a.map((v,i)=>v==null?'':`${i&&a[i-1]!=null?'L':'M'}${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join(' ');
+  let h=`<div class="tchart-wrap"><svg class="tchart xchart" id="cchart" viewBox="0 0 ${W} ${H}" role="img" aria-label="수별 남은 시간">`;
+  for(let v=0;v<=top;v+=step) h+=`<line x1="${L}" x2="${W-R}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" stroke="var(--line)" stroke-width="1"/><text x="${L-6}" y="${(y(v)+4).toFixed(1)}" font-size="11" text-anchor="end" fill="var(--muted)">${clk(v)}</text>`;
+  h+=`<line id="ccur" x1="${L}" x2="${L}" y1="${T}" y2="${T+ph}" stroke="var(--muted)" stroke-width="1"/>`;
+  h+=`<path d="${path(op)}" fill="none" stroke="var(--s2)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+  h+=`<path d="${path(me)}" fill="none" stroke="var(--s1)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+  G.plies.forEach((p,i)=>{ if(p.mine&&p.spent!=null&&p.spent>=45&&p.clock!=null) h+=`<circle cx="${x(i+1).toFixed(1)}" cy="${y(p.clock).toFixed(1)}" r="4" fill="var(--s1)" stroke="var(--surface)" stroke-width="2"/>`; });
+  // 끝점: 색 점 + 값 (글자는 본문색). 두 값이 붙으면 위아래로 벌린다
+  const em=me[n], eo=op[n]; let ym=em!=null?y(em):null, yo=eo!=null?y(eo):null;
+  if(ym!=null&&yo!=null&&Math.abs(ym-yo)<13){ const mid=(ym+yo)/2, up=ym<=yo; ym=mid+(up?-6.5:6.5); yo=mid+(up?6.5:-6.5); }
+  if(eo!=null) h+=`<circle cx="${x(n).toFixed(1)}" cy="${y(eo).toFixed(1)}" r="4" fill="var(--s2)" stroke="var(--surface)" stroke-width="2"/><text x="${W-R+8}" y="${(yo+4).toFixed(1)}" font-size="11.5" font-weight="600" fill="var(--text2)">${clk(eo)}</text>`;
+  if(em!=null) h+=`<circle cx="${x(n).toFixed(1)}" cy="${y(em).toFixed(1)}" r="4" fill="var(--s1)" stroke="var(--surface)" stroke-width="2"/><text x="${W-R+8}" y="${(ym+4).toFixed(1)}" font-size="11.5" font-weight="700" fill="var(--text)">${clk(em)}</text>`;
+  h+=`<text x="${L}" y="${H-5}" font-size="11" fill="var(--muted)">1수</text><text x="${W-R}" y="${H-5}" font-size="11" text-anchor="end" fill="var(--muted)">${Math.ceil(n/2)}수</text>`;
+  h+=`<g class="xc" style="display:none"><line class="xc-l" y1="${T}" y2="${T+ph}" stroke="var(--text2)" stroke-width="1"/><circle class="xc-d" r="5" fill="var(--s1)" stroke="var(--surface)" stroke-width="2"/><circle class="xc-d" r="5" fill="var(--s2)" stroke="var(--surface)" stroke-width="2"/></g>`;
+  h+=`</svg><div class="tip"></div></div>`;
+  CLK={L,pw,n};
+  CHARTS.cchart={N:n+1,L,pw,W,x,ys:(i,k)=>{ const v=k===0?me[i]:op[i]; return v==null?null:y(v); },
+    tip:i=>({head:i?`${G.plies[i-1].move}수 ${G.plies[i-1].mover==='w'?'백':'흑'}`:'시작', rows:[{c:'var(--s1)',k:'나',v:clk(me[i])},{c:'var(--s2)',k:'상대',v:clk(op[i])}]}),
+    pick:i=>go(i)};
+  return h;
 }
 function graphSVG(){
   const n=G.plies.length, W=360, H=90, mid=H/2;
@@ -86,6 +120,7 @@ function draw(){
   document.querySelectorAll('.mv[data-jump]').forEach(el=>el.classList.toggle('cur',+el.dataset.jump===IDX));
   { const st=$('#strip'), c=st&&st.querySelector('.mv.cur'); if(st) st.scrollTo({left:c?c.offsetLeft-st.offsetLeft-st.clientWidth/2+c.clientWidth/2:0,behavior:'smooth'}); }
   const g=$('#gcur'); if(g){ g.setAttribute('x1',(IDX/n*360).toFixed(1)); g.setAttribute('x2',(IDX/n*360).toFixed(1)); }
+  const cc=$('#ccur'); if(cc&&CLK){ const X=(CLK.L+IDX/CLK.n*CLK.pw).toFixed(1); cc.setAttribute('x1',X); cc.setAttribute('x2',X); }
   applyTheme();
 }
 function go(i){ IDX=Math.max(0,Math.min(G.plies.length,i)); draw(); }
