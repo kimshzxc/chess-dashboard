@@ -4,12 +4,15 @@ $('#tpanel-slot').innerHTML=themePanel(); applyMode();
 $('#backbtn').innerHTML=icon('back')+'게임 목록';
 const params=new URLSearchParams(location.search);
 const ID=params.get('id'); let G=null, IDX=0, FLIP=false, SHOW_BEST=true;
+let COACH=null;   // coach.json: 전체 기간의 집중 과제와 유형별 최근 빈도 (없어도 페이지는 동작한다)
 const CLS={best:['최선','best'],good:['좋음','good'],inacc:['부정확','inacc'],mist:['실수','mist'],blun:['대실수','blun'],miss:['외통 놓침','blun']};
 const CLSCOLOR={best:'var(--c-best)',good:'var(--c-good)',inacc:'var(--c-inacc)',mist:'var(--c-mist)',blun:'var(--c-blun)',miss:'var(--c-blun)'};
 
 async function load(){
+  const coach=fetch('coach.json',{cache:'no-cache'}).then(r=>r.ok?r.json():null).catch(()=>null);
   try{ const r=await fetch(`games/${ID}.json`,{cache:'no-cache'}); if(!r.ok) throw new Error(r.status); G=await r.json(); }
   catch(e){ $('#main').innerHTML=`<div class="empty">게임 데이터를 찾을 수 없습니다 (${esc(ID)}). 아직 분석·업로드되지 않았을 수 있습니다.</div>`; return; }
+  COACH=await coach;
   FLIP = G.my_color==='b';
   const p=+params.get('ply'); IDX = (p>0&&p<=G.plies.length)? p : 0;
   document.title=`${G.white} vs ${G.black} · 게임 분석`;
@@ -20,6 +23,21 @@ function renderHead(){
   <div class="sub" style="margin-top:6px">${G.date} · ${esc(G.termination||'')} · <a href="${esc(G.url)}" target="_blank" rel="noopener">체스닷컴 ↗</a></div>
   <div class="sub" style="color:var(--muted)">${esc(G.eco_name)}</div>`;
 }
+/* 이 판의 교훈: 내 실수를 유형별로 묶고, 평소에도 반복하는 유형인지 알려 준다 */
+function lessonsHTML(){
+  const by={}; G.plies.forEach((p,i)=>{ if(p.mine&&p.cat) (by[p.cat]=by[p.cat]||[]).push({p,i}); });
+  const cost=k=>by[k].reduce((a,x)=>a+x.p.wp_loss,0);
+  const keys=Object.keys(by).sort((a,b)=>cost(b)-cost(a));
+  let h=`<div class="card lessons" id="lessons"><h3 style="margin-top:0">이 판의 교훈 <span class="sub">(승률을 10%p 이상 잃은 내 수)</span></h3>`;
+  if(!keys.length) return h+`<div class="sub">그런 수가 하나도 없었습니다. 깨끗한 판입니다.</div></div>`;
+  const focus=(COACH&&COACH.focus)||[], hit=focus.filter(k=>by[k]);
+  if(focus.length) h+=`<div class="lv">${hit.length?`집중 과제 ${focus.length}가지 중 <b>${hit.length}가지가 또 나왔습니다.</b>`:`집중 과제 ${focus.length}가지는 <b>하나도 안 나왔습니다.</b>`}</div>`;
+  for(const k of keys){ const m=catOf(k), c=COACH&&COACH.cats&&COACH.cats[k];
+    h+=`<div class="lesson"><div class="lh"><b>${esc(m.n)}</b>${focus.includes(k)?'<span class="chip me">집중 과제</span>':''}<span class="lc">−${cost(k).toFixed(0)}%p</span></div>
+      <div class="lm">${by[k].map(({p,i})=>`<span class="lmv" data-jump="${i+1}">${mv(p)}</span>`).join('')}</div>
+      <div class="sub">${c?`최근 ${COACH.k}판 중 ${c.recent}판에서 나온 유형 · `:''}두기 전에: ${esc(m.rule)} <a href="index.html?cat=${k}#mistakes">다른 사례 ›</a></div></div>`; }
+  return h+'</div>';
+}
 function renderMain(){
   const s=G.summary, n=G.plies.length;
   let h=`<div class="stick"><div class="boardwrap"><div class="evalbar" id="evalbar"><div class="w"></div><span></span></div><div id="board" style="flex:1;min-width:0"></div></div>`;
@@ -27,6 +45,7 @@ function renderMain(){
   h+=`<div class="vctl"><span class="btn nav" data-go="0">⏮</span><span class="btn nav" data-go="-1">‹</span><span class="btn nav" data-go="1">›</span><span class="btn nav" data-go="9">⏭</span></div></div>`;
   h+=`<div class="opts"><span class="btn ${SHOW_BEST?'on':''}" id="optbest">정답 화살표</span><span class="btn" id="optflip">판 뒤집기</span></div>`;
   h+=`<div class="info card" id="info"></div>`;
+  h+=lessonsHTML();
   h+=`<div class="card"><div class="sub">평가 그래프 (누르면 이동 · 점: 실수/대실수)</div>${graphSVG()}</div>`;
   const cs=clockSVG();
   if(cs) h+=`<div class="card"><div class="sub">남은 시간 (누르면 그 수로 이동)</div>${cs}<div class="legend"><span><i class="lk" style="background:var(--s1)"></i>나</span><span><i class="lk" style="background:var(--s2)"></i>상대</span><span><i class="dotk"></i>내가 45초 이상 쓴 수</span></div></div>`;
@@ -41,7 +60,7 @@ function renderMain(){
   const key=G.plies.map((p,i)=>({p,i})).filter(x=>x.p.mine&&x.p.wp_loss>=10).sort((a,b)=>b.p.wp_loss-a.p.wp_loss).slice(0,5);
   if(key.length){
     h+=`<div class="card"><h3 style="margin-top:0">내 핵심 실수 <span class="sub">(누르면 그 장면으로)</span></h3>`;
-    key.forEach(({p,i})=>{ h+=`<div class="key" data-jump="${i+1}"><span class="cls ${CLS[p.cls][1]}">${CLS[p.cls][0]}</span> <span class="mono">${mv(p)}</span> 대신 <span class="mono">${esc(p.best)}</span> <span class="sub">· ${ev(p.cp_before)} → ${ev(p.cp_after)} · 남은시간 ${clk(p.clock)}${p.spent!=null?` · ${Math.round(p.spent)}초 사용`:''}</span></div>`; });
+    key.forEach(({p,i})=>{ h+=`<div class="key" data-jump="${i+1}"><span class="cls ${CLS[p.cls][1]}">${CLS[p.cls][0]}</span> <span class="mono">${mv(p)}</span> 대신 <span class="mono">${esc(p.best)}</span> ${catTag(p.cat)} <span class="sub">· ${ev(p.cp_before)} → ${ev(p.cp_after)} · 남은시간 ${clk(p.clock)}${p.spent!=null?` · ${Math.round(p.spent)}초 사용`:''}</span></div>`; });
     h+='</div>';
   }
   h+=`<div class="card"><h3 style="margin-top:0">수 목록 <span class="sub">점: 수의 평가 · 작은 숫자: 그 수에 쓴 시간</span></h3><div class="legend">`+Object.entries({best:'최선',good:'좋음',inacc:'부정확',mist:'실수',blun:'대실수'}).map(([k,v])=>`<span><i style="background:${CLSCOLOR[k]}"></i>${v}</span>`).join('')+`</div><div class="mlist">`;
@@ -111,6 +130,7 @@ function draw(){
     info=`<div><span class="cls ${c[1]}">${c[0]}</span> <b>${mv(p)}</b> <span class="sub">(${who}) · 평가 ${ev(p.cp_before)} → ${ev(p.cp_after)}${p.wp_loss?` · 승률 −${p.wp_loss}%p`:''}</span></div>`;
     if(p.cls!=='best'&&p.cls!=='good'&&p.best) info+=`<div style="margin-top:3px">정답은 <b class="mono">${esc(p.best)}</b> (초록 화살표)</div>`;
     else if(nx&&SHOW_BEST) info+=`<div class="sub" style="margin-top:3px">다음 국면 엔진 추천: ${esc(nx.best)} (초록 화살표)</div>`;
+    if(p.mine&&p.cat) info+=`<div style="margin-top:5px">${catTag(p.cat,COACH&&COACH.focus&&COACH.focus.includes(p.cat)?'rep':'')} <span class="sub">${esc(catOf(p.cat).d)}</span></div>`;
     info+=`<div class="sub" style="margin-top:3px">남은 시간 ${clk(p.clock)}${p.spent!=null?` · 이 수에 ${Math.round(p.spent)}초`:''}</div>`;
     const L=G.lines[String(IDX)];
     if(L&&L.best_line&&L.best_line.length) info+=`<div class="sub" style="margin-top:3px">정답 수순: <span class="mono">${esc(L.best_line.map(s=>s.san).join(' '))}</span></div>`;

@@ -39,3 +39,12 @@ header{position:static;border-bottom:0;padding:calc(12px + env(safe-area-inset-t
 .legend i.lk{width:14px;height:3px;border-radius:2px;vertical-align:middle}
 .legend i.dotk{width:9px;height:9px;border-radius:50%;background:var(--s1);box-shadow:0 0 0 2px var(--surface),0 0 0 3px var(--line2)}
 #cchart{cursor:pointer;margin-top:8px}
+/* 이 판의 교훈 */
+.lessons{max-width:470px;margin-left:auto;margin-right:auto}
+.lessons .lv{font-size:14.5px;color:var(--text2);margin-bottom:4px}.lessons .lv b{color:var(--text)}
+.lesson{padding:11px 0;border-top:1px solid var(--line)}
+.lesson:last-child{padding-bottom:0}
+.lesson .lh{display:flex;align-items:center;gap:8px;font-size:15px}
+.lesson .lc{margin-left:auto;font-weight:700;font-size:14px;white-space:nowrap}
+.lesson .lm{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.lmv{display:inline-flex;align-items:center;min-height:34px;padding:0 11px;border-radius:9px;background:var(--surface2);border:1px solid var(--line2);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13.5px;font-weight:600;cursor:pointer;-webkit-tap-highlight-color:transparent}

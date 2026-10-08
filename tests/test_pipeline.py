@@ -53,6 +53,33 @@ class StatsHelpers(unittest.TestCase):
         self.assertFalse(pipeline.evidence_one([60, -80, 120, -90, 15, -70])["confident"])
 
 
+class MistakeTypes(unittest.TestCase):
+    """실수 유형 분류: 알려진 국면에서 기대한 유형이 나오는지."""
+    E4E5 = "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2"
+    HANGING_B = "r1bqk2r/pppp1ppp/2n5/2bNp3/4P1n1/3PBN2/PPP2PPP/R2QKB1R b KQkq - 0 6"     # 흑 c5 비숍이 e3 비숍에 걸려 있다
+
+    def ply(self, fen, san, best, before=0, after=-400, phase="middlegame"):
+        return dict(fen=fen, san=san, best=best, cp_before=before, cp_after=after, loss=max(0, before - after), phase=phase,
+                    mine=1, wp_loss=round(pipeline.winpct(before) - pipeline.winpct(after), 1))
+
+    def test_categories(self):
+        cat = pipeline.mistake_cat
+        self.assertEqual(cat(self.ply(self.E4E5, "Ba6", "Nf3"), dict(best="Nxa6")), "into_capture")
+        self.assertEqual(cat(self.ply(self.HANGING_B, "O-O", "Bxe3"), dict(best="Bxc5")), "ignored_threat")
+        self.assertEqual(cat(self.ply(self.HANGING_B, "d6", "Bxe3", after=-200), dict(best="h3")), "missed_capture")
+        self.assertEqual(cat(self.ply(self.E4E5, "Nf3", "Qh5", before=9990, after=300), None), "missed_mate")
+        self.assertEqual(cat(self.ply(self.E4E5, "g4", "Nf3", before=0, after=-9980), dict(best="Qh4")), "allowed_mate")
+        self.assertEqual(cat(self.ply(self.E4E5, "a3", "Nf3", after=-120, phase="opening"), dict(best="Nf6")), "opening")
+        for k in ("into_capture", "ignored_threat", "missed_capture", "missed_mate", "allowed_mate", "opening"):
+            self.assertIn(k, pipeline.CAT_KEYS)
+
+    def test_only_real_mistakes_are_tagged(self):
+        small = dict(self.ply(self.E4E5, "a3", "Nf3", after=-30), ply=3)
+        big = dict(self.ply(self.E4E5, "Ba6", "Nf3"), ply=3)
+        self.assertNotIn("cat", pipeline.tag_mistakes([small])[0])
+        self.assertEqual(pipeline.tag_mistakes([big, dict(mine=0, wp_loss=0, best="Nxa6", san="Nxa6")])[0]["cat"], "into_capture")
+
+
 class WithDb(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -96,6 +123,31 @@ class WithDb(unittest.TestCase):
             self.assertIn(w["trend"]["status"], ("insufficient", "better", "maybe_better", "flat", "maybe_worse", "worse"))
             if w["level"] == "hint":
                 self.assertFalse(w["ev"]["confident"])
+        co = S["coach"]
+        self.assertEqual(co["n"], sum(c["n"] for c in co["cats"]))
+        self.assertEqual(co["n"], 6)                      # 24판 중 4판마다 한 번 400 손해
+        self.assertAlmostEqual(sum(c["share"] for c in co["cats"]), 100, delta=0.5)
+        self.assertEqual([c["cost"] for c in co["cats"]], sorted((c["cost"] for c in co["cats"]), reverse=True))
+        for c in co["cats"]:
+            self.assertIn(c["key"], pipeline.CAT_KEYS)
+            self.assertEqual(len(c["recent"]["seq"]), co["k"])
+            self.assertEqual(c["recent"]["games"], sum(1 for x in c["recent"]["seq"] if x))
+            self.assertTrue(c["examples"] and all(e["cat"] == c["key"] for e in c["examples"]))
+        self.assertTrue(set(co["focus"]) <= {c["key"] for c in co["cats"]})
+        for col in "wb":
+            R = S["repertoire"][col]
+            self.assertEqual(R["base"]["n"], 12)
+            for side in ("mine", "opp"):
+                self.assertEqual(sum(r["n"] for r in R[side]), 12)            # 모든 판이 한 묶음에만 들어간다
+                for r in R[side]:
+                    self.assertEqual(r["win"] + r["draw"] + r["loss"], r["n"])
+                    self.assertIn(r["verdict"], ("weak", "weak_hint", "strong", "strong_hint", "even"))
+                    self.assertAlmostEqual(r["diff"], r["score"] - R["base"]["score"], places=1)
+            self.assertEqual(R["mine"][0]["key"], "1.e4" if col == "w" else "1…e5")
+        for col in "wb":
+            for o in S["openings"][col]:
+                self.assertEqual(sum(o["mist"]["by_move"]), o["mist"]["n"])
+                self.assertEqual(sum(c["n"] for c in o["mist"]["cats"]), o["mist"]["n"])
         hints = [w["level"] == "hint" for w in S["weaknesses"]]
         self.assertEqual(hints, sorted(hints))            # 근거 약한 항목은 뒤에 모인다
         json.dumps(S, ensure_ascii=False)                 # 직렬화 가능해야 한다
@@ -116,7 +168,7 @@ class WithDb(unittest.TestCase):
         n = pipeline.export_puzzles(self.con)
         self.assertGreater(n, 0)
         pz = json.load(open(os.path.join(pipeline.DOCS, "puzzles.json")))
-        for k in ("id", "fen", "uci", "best_uci", "wp_loss", "after_fen", "alts", "legal", "best_line"):
+        for k in ("id", "fen", "uci", "best_uci", "wp_loss", "after_fen", "alts", "legal", "best_line", "cat"):
             self.assertIn(k, pz[0])
         self.assertIn(pz[0]["best_uci"][:4], pz[0]["legal"].split())
         self.assertEqual(pz[0]["alts"][0]["uci"], "g1f3")
@@ -125,6 +177,19 @@ class WithDb(unittest.TestCase):
 
     def add_lines_not_ok(self):
         self.con.execute("DELETE FROM lines"); self.add_lines(puzzle_ok=False)
+
+    def test_game_export_and_coach_file(self):
+        self.assertEqual(pipeline.export_missing_games(self.con), 24)
+        g = json.load(open(os.path.join(pipeline.DOCS, "games", "1000.json")))
+        self.assertEqual([p.get("cat") for p in g["plies"]], ["opening", None])       # 내 수(백)의 400 손해만 유형이 붙는다
+        self.assertEqual(pipeline.export_missing_games(self.con), 0)                  # 형식 버전이 같으면 다시 내보내지 않는다
+        pipeline.meta_set(self.con, "game_export_v", "old")
+        self.assertEqual(pipeline.export_missing_games(self.con), 24)
+        pipeline.render_all(self.con, dict(CHESSCOM_USERNAME="me"))
+        coach = json.load(open(os.path.join(pipeline.DOCS, "coach.json")))
+        stats = json.load(open(os.path.join(pipeline.DOCS, "stats.json")))["windows"]["all"]["coach"]
+        self.assertEqual(coach["focus"], stats["focus"])
+        self.assertEqual(set(coach["cats"]), {c["key"] for c in stats["cats"]})
 
     def test_cached_lines_fallback(self):
         self.con.execute("CREATE TABLE pv_cache(fen TEXT, played TEXT, data TEXT, PRIMARY KEY(fen, played))")

@@ -17,6 +17,12 @@ const save=(k,v)=>{ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} 
 const HIST=load('puzzle-history',{}), REVIEW=load('puzzle-review',{}), SEEN=load('puzzle-seen',{});
 const BYID=Object.fromEntries(ALL.map(p=>[p.id,p]));
 const colorName=c=>c==='w'?'백':'흑';
+/* 유형 연습: puzzle.html?cat=<실수 유형> 이면 그 유형의 퍼즐만 낸다. 오늘의 묶음(puzzle-day)은 건드리지 않고
+   진행은 이 탭(sessionStorage)에만 둔다. 채점 기록·복습 일정·연속 일수에는 평소처럼 반영된다. */
+const CAT=new URLSearchParams(location.search).get('cat');
+const PRACTICE=!!(CAT&&CATS[CAT]);
+const COACH=await fetch('coach.json',{cache:'no-cache'}).then(r=>r.ok?r.json():null).catch(()=>null);
+const NCAT={}; for(const p of ALL) if(p.cat) NCAT[p.cat]=(NCAT[p.cat]||0)+1;
 
 function seeded(str){ let h=1779033703^str.length; for(let i=0;i<str.length;i++){ h=Math.imul(h^str.charCodeAt(i),3432918353); h=h<<13|h>>>19; } return ()=>{ h=Math.imul(h^h>>>16,2246822507); h=Math.imul(h^h>>>13,3266489909); return ((h^=h>>>16)>>>0)/4294967296; }; }
 function shuffled(arr,seed){ const r=seeded(seed), a=arr.slice(); for(let i=a.length-1;i>0;i--){ const j=Math.floor(r()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
@@ -33,15 +39,30 @@ function buildDay(){
   d.daily=d.ids.length;
   return d;
 }
-let TD=load('puzzle-day',null);
-if(!TD||TD.date!==TODAY||!Array.isArray(TD.ids)){ TD=buildDay(); save('puzzle-day',TD); }
+function buildPractice(){
+  const pool=shuffled(ALL.filter(p=>p.cat===CAT),TODAY+CAT);
+  const d={date:TODAY, ids:[], pz:{}, rv:{}, res:{}, idx:0, daily:0, cont:false, practice:CAT};
+  for(const p of [...pool.filter(p=>!SEEN[p.id]), ...pool.filter(p=>SEEN[p.id]).sort((a,b)=>SEEN[a.id].localeCompare(SEEN[b.id]))]){ d.ids.push(p.id); d.pz[p.id]=p; if(REVIEW[p.id]) d.rv[p.id]=true; }
+  d.daily=d.ids.length;
+  return d;
+}
+const saveDay=()=>{ if(!PRACTICE) return save('puzzle-day',TD); try{ sessionStorage.setItem('puzzle-practice',JSON.stringify(TD)); }catch(e){} };
+let TD;
+if(PRACTICE){
+  try{ TD=JSON.parse(sessionStorage.getItem('puzzle-practice')||'null'); }catch(e){ TD=null; }
+  if(!TD||TD.date!==TODAY||TD.practice!==CAT||!Array.isArray(TD.ids)){ TD=buildPractice(); saveDay(); }
+} else {
+  TD=load('puzzle-day',null);
+  if(!TD||TD.date!==TODAY||!Array.isArray(TD.ids)){ TD=buildDay(); saveDay(); }
+}
 const cur=()=>TD.pz[TD.ids[TD.idx]];
 const answered=()=>{ const w=cur(); return w?TD.res[w.id]:null; };
 /* 오늘의 묶음을 다 풀었으면 추가 문제를 하나 붙인다. 더 없으면 false */
 function ensureCurrent(){
   if(TD.idx<TD.ids.length) return true;
+  if(PRACTICE) return false;
   const nx=candidates(new Set(TD.ids),TODAY+'+')[0]; if(!nx) return false;
-  TD.ids.push(nx.id); TD.pz[nx.id]=nx; save('puzzle-day',TD); return true;
+  TD.ids.push(nx.id); TD.pz[nx.id]=nx; saveDay(); return true;
 }
 
 let SEL=null;
@@ -52,13 +73,22 @@ function headHTML(){
   const week=[6,5,4,3,2,1,0].map(i=>{ const k=dkey(-i), h=HIST[k]; return `<div><i class="${h?'has':''}" style="height:${h?Math.max(8,Math.round(h.n/mx*36)):4}px"></i>${'일월화수목금토'[new Date(k+'T00:00:00Z').getUTCDay()]}</div>`; }).join('');
   const waiting=Object.keys(REVIEW).length;
   let h=`<div class="card streakcard"><div><div class="sub">연속 풀이</div><div class="n">${n}<small>일</small></div><div class="sub">누적 정답 ${tot[0]} / ${tot[1]}${tot[1]?` (${Math.round(tot[0]/tot[1]*100)}%)`:''}${waiting?` · 복습 대기 ${waiting}개`:''}</div></div><div class="week">${week}</div></div>`;
+  const focus=(COACH&&COACH.focus)||[];
+  const keys=Object.keys(NCAT).filter(k=>CATS[k]).sort((a,b)=>(focus.includes(b)-focus.includes(a))||NCAT[b]-NCAT[a]);
+  if(keys.length) h+=`<div class="pzmodes"><a class="${PRACTICE?'':'on'}" href="puzzle.html">오늘의 퍼즐</a>${keys.map(k=>`<a class="${k===CAT?'on':''}" href="puzzle.html?cat=${k}">${esc(catOf(k).n)} ${NCAT[k]}</a>`).join('')}</div>`;
   const inDaily=TD.idx<TD.daily, vals=Object.values(TD.res);
+  if(PRACTICE) return h+`<div class="rule" style="margin-top:12px"><span>두기 전에</span>${esc(catOf(CAT).rule)}</div><div class="prog"><div><b>${esc(catOf(CAT).n)}</b> <span class="sub">유형 연습 ${Math.min(TD.idx+1,TD.daily)} / ${TD.daily} · 정답 ${vals.filter(x=>x==='ok').length} / ${vals.length}</span></div></div>`;
   h+=`<div class="prog"><div><b>${inDaily?'오늘의 퍼즐':'추가 퍼즐'}</b> <span class="sub">${inDaily?`${TD.idx+1} / ${TD.daily}`:`오늘 정답 ${vals.filter(x=>x==='ok').length} / ${vals.length}`}</span></div>`;
   if(inDaily) h+=`<div class="dots">${TD.ids.slice(0,TD.daily).map((id,i)=>`<i class="${TD.res[id]||''} ${i===TD.idx?'cur':''}"></i>`).join('')}</div>`;
   return h+`</div>`;
 }
 function render(){
   if(!ALL.length&&!TD.ids.length){ $('#main').innerHTML='<div class="empty">퍼즐이 아직 없습니다. 게임이 분석되면 생깁니다.</div>'; return; }
+  if(PRACTICE&&TD.idx>=TD.daily){   // 유형 연습 끝 (또는 이 유형의 퍼즐이 없음)
+    const ok=Object.values(TD.res).filter(x=>x==='ok').length;
+    $('#main').innerHTML=`<div id="pzhead">${headHTML()}</div><div class="card done"><div class="sub">${TD.daily?`${esc(catOf(CAT).n)} 연습 끝`:'이 유형의 퍼즐이 아직 없습니다'}</div>${TD.daily?`<div class="big">${ok} / ${TD.daily}</div><div class="sub">틀린 문제는 오늘의 퍼즐에 복습으로 다시 나옵니다.</div>`:''}<div class="acts"><a class="btn" href="index.html?cat=${CAT}#mistakes">이 유형 사례</a><a class="btn on" href="puzzle.html">오늘의 퍼즐 ›</a></div></div>`;
+    return;
+  }
   if(TD.daily&&TD.idx===TD.daily&&!TD.cont){   // 오늘의 묶음 끝
     const ok=TD.ids.slice(0,TD.daily).filter(id=>TD.res[id]==='ok').length;
     $('#main').innerHTML=`<div id="pzhead">${headHTML()}</div><div class="card done"><div class="sub">오늘의 퍼즐 끝</div><div class="big">${ok} / ${TD.daily}</div><div class="sub">틀린 문제는 내일부터 복습으로 다시 나옵니다.</div><div class="acts"><a class="btn" href="index.html">대시보드</a><span class="btn on" id="more">더 풀기 ›</span></div></div>`;
@@ -99,7 +129,7 @@ function answer(uci){
   const w=cur();
   const accepted=new Set([w.best_uci.slice(0,4), ...(w.alts||[]).map(a=>a.uci.slice(0,4))]);   // 최선 수와, 승률 차이가 작아 같이 인정하는 수
   const ok=uci!==null&&accepted.has(uci.slice(0,4));
-  TD.res[w.id]=ok?'ok':'ng'; save('puzzle-day',TD);
+  TD.res[w.id]=ok?'ok':'ng'; saveDay();
   const h=HIST[TODAY]||{ok:0,n:0}; h.n++; if(ok) h.ok++; HIST[TODAY]=h; save('puzzle-history',HIST);
   SEEN[w.id]=TODAY; const sk=Object.keys(SEEN); if(sk.length>MAX_SEEN) sk.sort((a,b)=>SEEN[a].localeCompare(SEEN[b])).slice(0,sk.length-MAX_SEEN).forEach(k=>delete SEEN[k]); save('puzzle-seen',SEEN);
   const r=REVIEW[w.id];
@@ -126,6 +156,7 @@ function showAnswer(uci,restored){
   else msg=`<span class="ic">오답</span>가장 좋은 수는 <b>${esc(w.best)}</b> 입니다. ${lost} (${ev(w.cp_before)} → ${ev(w.cp_after)}).`;
   const others=(w.alts||[]).filter(a=>a!==alt).map(a=>esc(a.san));
   if(others.length) msg+=`<div class="sub" style="margin-top:6px">${alt?'그 밖에':'같이'} 정답으로 인정되는 수: ${others.join(', ')}</div>`;
+  if(w.cat) msg+=`<div class="sub" style="margin-top:8px">${catTag(w.cat,COACH&&COACH.focus&&COACH.focus.includes(w.cat)?'rep':'')} 두기 전에: ${esc(catOf(w.cat).rule)}</div>`;
   const rv=REVIEW[w.id];
   if(rv) msg+=`<div class="sub" style="margin-top:6px">${Math.max(1,Math.round((Date.parse(rv.due)-Date.parse(TODAY))/DAY))}일 뒤 복습으로 다시 나옵니다.</div>`;
   else if(TD.rv[w.id]&&ok) msg+=`<div class="sub" style="margin-top:6px">복습을 마쳤습니다.</div>`;
@@ -148,7 +179,7 @@ document.addEventListener('pointerdown',(e)=>{
 });
 document.addEventListener('click',(e)=>{
   if(e.target.closest('#giveup')){ if(!answered()) answer(null); return; }
-  if(e.target.closest('#next')){ TD.idx++; SEL=null; save('puzzle-day',TD); render(); window.scrollTo(0,0); return; }
-  if(e.target.closest('#more')){ TD.cont=true; save('puzzle-day',TD); render(); window.scrollTo(0,0); }
+  if(e.target.closest('#next')){ TD.idx++; SEL=null; saveDay(); render(); window.scrollTo(0,0); return; }
+  if(e.target.closest('#more')){ TD.cont=true; saveDay(); render(); window.scrollTo(0,0); }
 });
 render();

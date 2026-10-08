@@ -263,6 +263,101 @@ def opp_best_captures(p, nxt):
     return None
 
 
+# ---------------------------------------------------------------- 실수 유형 분류
+# 내 수 중 승률을 MISTAKE_WP %p 이상 잃은 수를 "실수"로 보고, 왜 틀렸는지를 한 가지 유형으로 나눈다.
+# 엔진을 다시 돌리지 않고 저장된 값(국면, 둔 수, 최선 수, 다음 국면의 상대 최선 수)만 쓴다.
+# 유형의 이름·설명·규칙 문장은 docs/shared.js 의 CATS 에 있다 (키가 같아야 한다).
+MISTAKE_WP = 10.0
+EARLY_MOVES = 15       # 오프닝 단계로 보는 수 (오프닝별 실수 집계)
+CAT_KEYS = ("into_capture", "ignored_threat", "unguard", "bad_trade", "allowed_tactic", "allowed_mate",
+            "missed_capture", "missed_tactic", "missed_mate", "opening", "middlegame", "endgame")
+PIECE_VAL = {chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3, chess.ROOK: 5, chess.QUEEN: 9, chess.KING: 0}
+
+
+def is_mistake(p):
+    return bool(p["mine"] and p["wp_loss"] >= MISTAKE_WP and p["best"] and p["best"] != p["san"])
+
+
+def _creates_threat(after, reply):
+    """상대의 수 reply 가 내 기물(킹 제외)을 새로 노리는가: 더 비싼 기물을 공격하거나, 지켜지지 않은 기물을 공격."""
+    b = after.copy()
+    b.push(reply)
+    pt, me = b.piece_type_at(reply.to_square), b.turn
+    for sq in b.attacks(reply.to_square):
+        q = b.piece_at(sq)
+        if q and q.color == me and q.piece_type != chess.KING and \
+                (PIECE_VAL[q.piece_type] > PIECE_VAL[pt] or not b.attackers(me, sq)):
+            return True
+    return False
+
+
+def mistake_cat(p, nxt):
+    """실수 하나의 유형 키. p = 내 수, nxt = 바로 다음 수(상대) 레코드 또는 None. 위에서부터 먼저 맞는 것 하나.
+      missed_mate     강제 외통이 있었는데 놓침
+      allowed_mate    이 수로 강제 외통을 허용
+      into_capture    잡히는 칸으로 기물을 옮김
+      ignored_threat  이미 공격받던 기물을 그대로 둠
+      unguard         지키던 기물을 떼거나 길을 열어 다른 기물이 잡힘
+      bad_trade       손해 보는 잡기·교환
+      missed_capture  잡는 수가 최선이었는데 안 잡음
+      missed_tactic   체크로 시작하는 수가 최선이었는데 놓침
+      allowed_tactic  상대의 다음 한 수(체크·잡기·새 위협)를 못 봄
+      opening / middlegame / endgame   위에 해당하지 않는 조용한 실수 (국면별)"""
+    try:
+        b = chess.Board(p["fen"])
+        mv = b.parse_san(p["san"])
+    except Exception:
+        return p["phase"]
+    try:
+        best = b.parse_san(p["best"]) if p.get("best") else None
+    except Exception:
+        best = None
+    if p["cp_before"] >= 9000 and p["cp_after"] < 9000:
+        return "missed_mate"
+    if p["cp_after"] <= -9000 and p["cp_before"] > -9000:
+        return "allowed_mate"
+    me = b.turn
+    after = b.copy()
+    after.push(mv)
+    reply = None
+    if nxt and nxt.get("best"):
+        try:
+            reply = after.parse_san(nxt["best"])
+        except Exception:
+            reply = None
+    loss = p["loss"]
+    if reply and loss >= 200 and after.is_capture(reply):
+        to = reply.to_square
+        pt = after.piece_type_at(to)
+        if pt and pt >= chess.KNIGHT:
+            if to == mv.to_square:
+                if not b.is_capture(mv):
+                    return "into_capture"
+                if PIECE_VAL[b.piece_type_at(mv.from_square)] > PIECE_VAL[b.piece_type_at(mv.to_square) or chess.PAWN]:
+                    return "bad_trade"
+            else:
+                existed = reply.from_square in b.attackers(not me, to)     # 두기 전에도 같은 기물이 노리고 있었나
+                was_guard = mv.from_square in b.attackers(me, to)          # 움직인 기물이 그 칸을 지키고 있었나
+                return "ignored_threat" if existed and not was_guard else "unguard"
+    if best and loss >= 150 and b.is_capture(best):
+        return "missed_capture"
+    if best and loss >= 150 and b.gives_check(best):
+        return "missed_tactic"
+    if loss >= 150 and b.is_capture(mv):
+        return "bad_trade"
+    if reply and loss >= 200 and (after.is_capture(reply) or after.gives_check(reply) or _creates_threat(after, reply)):
+        return "allowed_tactic"
+    return p["phase"]
+
+
+def tag_mistakes(plies):
+    """게임 하나의 수 목록에서 내 실수에 cat 을 붙인다 (제자리 수정)."""
+    for i, p in enumerate(plies):
+        if is_mistake(p):
+            p["cat"] = mistake_cat(p, plies[i + 1] if i + 1 < len(plies) else None)
+    return plies
+
+
 def summarize(plies):
     """게임 하나의 요약 (DB summary 컬럼, 알림, 최근 게임 목록에 사용)."""
     mine = [p for p in plies if p["mine"]]
@@ -483,7 +578,7 @@ def load_games(con, since_ts=None):
     games = [dict(r) for r in con.execute(q + " ORDER BY end_time", args)]
     for g in games:
         g["summary"] = json.loads(g["summary"]) if g["summary"] else {}
-        g["plies"] = [dict(r) for r in con.execute("SELECT * FROM plies WHERE url=? ORDER BY ply", (g["url"],))]
+        g["plies"] = tag_mistakes([dict(r) for r in con.execute("SELECT * FROM plies WHERE url=? ORDER BY ply", (g["url"],))])
     return games
 
 
@@ -695,7 +790,7 @@ def compute_stats(games, con=None):
             early = [p for g in gs for p in g["plies"] if p["mine"] and p["move"] <= 15]
             names = Counter(g["eco_name"] for g in gs).most_common(1)[0][0]
             rows.append(dict(moves=key, name=names[:40], n=len(gs), win=cc["W"], draw=cc["D"], loss=cc["L"],
-                             path=opening_path(gs, c), trouble=opening_trouble(gs, con),
+                             path=opening_path(gs, c), trouble=opening_trouble(gs, con, top=5), mist=opening_mistakes(gs),
                              score=round((cc["W"] + 0.5 * cc["D"]) / len(gs) * 100),
                              early_blunders=sum(1 for p in early if p["loss"] >= 300),
                              early_blunder_rate=round(sum(1 for p in early if p["loss"] >= 300) / max(1, len(early)) * 100, 1),
@@ -728,14 +823,13 @@ def compute_stats(games, con=None):
                                 eco_name=g["eco_name"][:35], evals=evals,
                                 **{k: g["summary"].get(k) for k in ("accuracy", "blunders", "mistakes", "hung", "missed_mate",
                                                                     "my_final_clock", "opp_final_clock", "n_moves")},
-                                worst=with_lines(con, g["summary"].get("worst"))))
+                                cats=Counter(p["cat"] for p in g["plies"] if p.get("cat")).most_common(),
+                                worst=with_lines(con, worst_with_cat(g))))
     worst = []
     for g in games:
         for p in g["plies"]:
             if p["mine"] and p["wp_loss"] >= 30:
-                worst.append(dict(url=g["url"], date=g["date"], opp=g["opp"], color=g["my_color"], move=p["move"], mover=p["mover"],
-                                  san=p["san"], best=p["best"], cp_before=p["cp_before"], cp_after=p["cp_after"], wp_loss=p["wp_loss"],
-                                  clock=p["clock"], spent=p["spent"], phase=p["phase"], fen=p["fen"]))
+                worst.append(mistake_rec(g, p))
     worst.sort(key=lambda w: (-w["wp_loss"], w["date"]))
     S["worst"] = [with_lines(con, w) for w in worst[:15]]
     # 유형별 대표 실수 (기물 방치 / 외통 놓침 / 유리한 판 붕괴) 각 5개
@@ -745,9 +839,7 @@ def compute_stats(games, con=None):
         for i, p in enumerate(pl):
             if not p["mine"]:
                 continue
-            base = dict(url=g["url"], date=g["date"], opp=g["opp"], color=g["my_color"], move=p["move"], mover=p["mover"],
-                        san=p["san"], best=p["best"], cp_before=p["cp_before"], cp_after=p["cp_after"], wp_loss=p["wp_loss"],
-                        clock=p["clock"], spent=p["spent"], phase=p["phase"], fen=p["fen"])
+            base = mistake_rec(g, p)
             if len(S["examples"]["missed_mate"]) < 5 and p["cp_before"] >= 9970 and p["cp_after"] < 9000:
                 S["examples"]["missed_mate"].append(base)
             elif len(S["examples"]["hung"]) < 5 and p["loss"] >= 300 and (p["clock"] or 999) >= 60 and \
@@ -757,8 +849,210 @@ def compute_stats(games, con=None):
                 S["examples"]["collapse"].append(base)
     for k in S["examples"]:
         S["examples"][k] = [with_lines(con, w) for w in S["examples"][k]]
+    S["coach"] = coach_stats(games, con)
+    S["repertoire"] = repertoire_stats(games, con)
     S["weaknesses"] = weaknesses(S, games)
     return S
+
+
+def mistake_rec(g, p):
+    """실수 한 수의 표시용 레코드 (뷰어·목록 공용). cat 은 실수 유형 키 (승률 손해가 작으면 없음)."""
+    return dict(url=g["url"], date=g["date"], opp=g["opp"], color=g["my_color"], move=p["move"], mover=p["mover"], ply=p["ply"],
+                san=p["san"], best=p["best"], cp_before=p["cp_before"], cp_after=p["cp_after"], wp_loss=p["wp_loss"],
+                clock=p["clock"], spent=p["spent"], phase=p["phase"], fen=p["fen"], cat=p.get("cat"))
+
+
+def worst_with_cat(g):
+    """요약에 저장된 '가장 아픈 수'에 그 수의 실수 유형을 붙인다."""
+    w = g["summary"].get("worst")
+    if not w:
+        return w
+    p = next((p for p in g["plies"] if p["mine"] and p["move"] == w["move"] and p["san"] == w["san"]), None)
+    return dict(w, cat=p.get("cat") if p else None)
+
+
+def _share(part, whole):
+    return round(len(part) / len(whole) * 100) if whole else None
+
+
+def coach_stats(games, con=None, n_examples=5):
+    """실수 유형별 집계: 얼마나 자주, 얼마나 비싸게, 어떤 상황에서, 최근에도 나오는지.
+    cost 는 그 유형으로 잃은 승률(%p)의 합이고, cats 는 cost 가 큰 순서다. focus 는 가장 비싼 3가지."""
+    n_games = len(games)
+    per = defaultdict(list)                       # 유형 → [(게임 순번, 수)]
+    for gi, g in enumerate(games):
+        for p in g["plies"]:
+            if p.get("cat"):
+                per[p["cat"]].append((gi, p))
+    total_n = sum(len(v) for v in per.values())
+    total_cost = sum(p["wp_loss"] for v in per.values() for _, p in v)
+    K = min(10, n_games)
+    cats = []
+    for key in CAT_KEYS:
+        lst = per.get(key)
+        if not lst:
+            continue
+        ps = [p for _, p in lst]
+        by_game = Counter(gi for gi, _ in lst)
+        cost = sum(p["wp_loss"] for p in ps)
+        clocked = [p for p in ps if p["clock"] is not None]
+        timed = [p for p in clocked if p["spent"] is not None]
+        seq = [by_game.get(gi, 0) for gi in range(n_games - K, n_games)]
+        newest = sorted(lst, key=lambda x: (-x[0], -x[1]["wp_loss"]))[:n_examples]
+        cats.append(dict(
+            key=key, n=len(ps), games=len(by_game), game_rate=round(len(by_game) / n_games * 100), per_game=round(len(ps) / n_games, 2),
+            cost=round(cost), share=round(cost / total_cost * 100, 1), avg=round(cost / len(ps), 1),
+            ctx=dict(calm=_share([p for p in clocked if p["clock"] >= 60], clocked),          # 시간이 1분 이상 남았을 때
+                     low_clock=_share([p for p in clocked if p["clock"] < 30], clocked),      # 30초 미만
+                     fast=_share([p for p in timed if p["spent"] < 5 and p["clock"] >= 60], timed),   # 여유가 있는데 5초 안에 둠
+                     slow=_share([p for p in timed if p["spent"] >= 30], timed),              # 30초 넘게 생각하고도
+                     winning=_share([p for p in ps if p["cp_before"] >= 300], ps),            # +3 이상 유리하던 국면
+                     spent_median=median([p["spent"] for p in timed]),
+                     phase={ph: sum(1 for p in ps if p["phase"] == ph) for ph in ("opening", "middlegame", "endgame")}),
+            recent=dict(k=K, games=sum(1 for x in seq if x), n=sum(seq), seq=seq),
+            trend=trend_analysis(metric_series(games, "cat", key), "cat"),
+            examples=[with_lines(con, mistake_rec(games[gi], p)) for gi, p in newest]))
+    cats.sort(key=lambda c: -c["cost"])
+    early = [p for g in games for p in g["plies"] if p.get("cat") and p["move"] <= EARLY_MOVES]
+    ec = Counter(p["cat"] for p in early)
+    by_color = {}
+    for c in "wb":
+        gs = [g for g in games if g["my_color"] == c]
+        by_color[c] = round(sum(1 for g in gs for p in g["plies"] if p.get("cat") and p["move"] <= EARLY_MOVES) / len(gs), 2) if gs else None
+    return dict(n=total_n, games=n_games, per_game=round(total_n / n_games, 2), cost=round(total_cost), k=K,
+                threshold=MISTAKE_WP, early_moves=EARLY_MOVES,
+                cats=cats, focus=[c["key"] for c in cats if c["n"] >= 3][:3],
+                early=dict(n=len(early), per_game=round(len(early) / n_games, 2), per_game_by_color=by_color,
+                           cats=[dict(key=k, n=v, cost=round(sum(p["wp_loss"] for p in early if p["cat"] == k))) for k, v in ec.most_common()]))
+
+
+# ---------------------------------------------------------------- 오프닝 성적표 (내가 고른 수순 / 상대가 고른 수순)
+OPENING_KO = (("Italian Game", "이탈리안 게임"), ("Giuoco Piano", "이탈리안 게임"), ("Four Knights", "포 나이츠 게임"), ("Three Knights", "쓰리 나이츠"),
+              ("Scotch", "스카치 게임"), ("Ruy Lopez", "루이 로페즈"), ("Philidor", "필리도르 디펜스"), ("Petrov", "페트로프 디펜스"),
+              ("Sicilian", "시실리안 디펜스"), ("Caro Kann", "카로칸 디펜스"), ("French", "프렌치 디펜스"), ("Scandinavian", "스칸디나비안 디펜스"),
+              ("Alekhine", "알레힌 디펜스"), ("Pirc", "피르츠 디펜스"), ("Modern Defense", "모던 디펜스"), ("Vienna", "비엔나 게임"),
+              ("Bishops Opening", "비숍 오프닝"), ("Kings Gambit", "킹스 갬빗"), ("Center Game", "센터 게임"), ("Ponziani", "폰지아니"),
+              ("Queens Gambit", "퀸스 갬빗"), ("London", "런던 시스템"), ("Slav", "슬라브 디펜스"), ("Kings Indian", "킹스 인디언"),
+              ("Nimzowitsch", "님조비치 디펜스"), ("Englund", "잉글런드 갬빗"), ("English", "잉글리시 오프닝"), ("Queens Pawn", "퀸스 폰 오프닝"),
+              ("Kings Pawn", "킹스 폰 오프닝"), ("Dutch", "더치 디펜스"), ("Owen", "오언 디펜스"))
+
+
+def opening_name_ko(eco_name):
+    for en, ko in OPENING_KO:
+        if en in (eco_name or ""):
+            return ko
+    return " ".join((eco_name or "").split()[:3])
+
+
+def _side_key(g, me, k):
+    """한쪽이 둔 처음 k수 (me=True 면 내 수, False 면 상대 수)."""
+    return tuple(p["san"] for p in g["plies"] if bool(p["mine"]) == me)[:k]
+
+
+def _key_label(key, white):
+    return " ".join(f"{i + 1}.{m}" if white else f"{i + 1}…{m}" for i, m in enumerate(key))
+
+
+def repertoire_groups(gs, me, white, min_n):
+    """같은 색 게임들을 한쪽의 첫 수들로 묶는다. 백의 수는 3수, 흑의 수는 2수까지 보고,
+    판 수가 min_n 에 못 미치는 갈래는 한 수 짧은 묶음('그 외')으로 합친다."""
+    left, out = list(gs), []
+    for k in range(3 if white else 2, 0, -1):
+        d = defaultdict(list)
+        for g in left:
+            key = _side_key(g, me, k)
+            if len(key) == k:
+                d[key].append(g)
+        for key, v in d.items():
+            if len(v) >= min_n:
+                out.append((key, v, k < (3 if white else 2)))
+        taken = {id(g) for _, v, _ in out for g in v}
+        left = [g for g in left if id(g) not in taken]
+    return out
+
+
+def _eval_at(g, move):
+    """내 move 번째 수를 둔 뒤의 평가 (내 기준 cp). 그 전에 끝난 판은 None."""
+    p = next((p for p in g["plies"] if p["mine"] and p["move"] == move), None)
+    return max(-1000, min(1000, p["cp_after"])) if p else None
+
+
+def _clock_at(g, move):
+    p = next((p for p in g["plies"] if p["mine"] and p["move"] == move), None)
+    return p["clock"] if p else None
+
+
+def _mean(v):
+    v = [x for x in v if x is not None]
+    return sum(v) / len(v) if v else None
+
+
+def repertoire_row(key, gs, rest, base, con, white, me, other):
+    cc = Counter(g["outcome"] for g in gs)
+    n = len(gs)
+    score = round((cc["W"] + 0.5 * cc["D"]) / n * 100, 1)
+    ev = evidence([POINTS[g["outcome"]] for g in gs], [POINTS[g["outcome"]] for g in rest]) if rest else dict(n=n, unit="판", p=None, confident=False)
+    diff = round(score - base["score"], 1)
+    verdict = "even"
+    if abs(diff) >= 8:                                   # 8판 미만이거나 검정을 통과하지 못하면 '조짐'
+        verdict = ("weak" if diff < 0 else "strong") + ("" if ev["confident"] and n >= 8 else "_hint")
+    e15 = _mean([_eval_at(g, EARLY_MOVES) for g in gs])
+    c15 = _mean([_clock_at(g, EARLY_MOVES) for g in gs])
+    early = [p for g in gs for p in g["plies"] if p["mine"] and p["move"] <= EARLY_MOVES]
+    ahead = [g["outcome"] for g in gs if (_eval_at(g, EARLY_MOVES) or 0) >= 100]
+    behind = [g["outcome"] for g in gs if (_eval_at(g, EARLY_MOVES) or 0) <= -100]
+    # 진 판에서 승부를 가른 수(가장 큰 승률 손해)가 언제, 어떤 유형이었나
+    losses = [g for g in gs if g["outcome"] == "L"]
+    dec = [max((p for p in g["plies"] if p["mine"]), key=lambda p: p["wp_loss"], default=None) for g in losses]
+    dec = [p for p in dec if p and p["wp_loss"] >= MISTAKE_WP]
+    recent_l = sorted(losses, key=lambda g: -g["end_time"])[:3]
+    return dict(
+        key=_key_label(key, white), other=other, name=opening_name_ko(Counter(g["eco_name"] for g in gs).most_common(1)[0][0]),
+        n=n, win=cc["W"], draw=cc["D"], loss=cc["L"], score=score, diff=diff, verdict=verdict, ev=ev,
+        eval15=round(e15) if e15 is not None else None, clock15=round(c15) if c15 is not None else None,
+        acc15=acc([p["wp_loss"] for p in early]),
+        ahead=dict(n=len(ahead), score=_score(ahead)), behind=dict(n=len(behind), score=_score(behind)),
+        decisive=dict(n=len(dec), early=sum(1 for p in dec if p["move"] <= EARLY_MOVES),
+                      cats=Counter(p["cat"] for p in dec if p.get("cat")).most_common(3)),
+        mist=opening_mistakes(gs), trouble=opening_trouble(gs, con, top=3),
+        review=[dict(url=g["url"], date=g["date"], opp=g["opp"], accuracy=g["summary"].get("accuracy")) for g in recent_l])
+
+
+def repertoire_stats(games, con=None):
+    """색마다 두 갈래의 오프닝 성적표: mine = 내가 고른 수순(내 첫 수들), opp = 상대가 고른 수순(상대 첫 수들).
+    각 묶음에 승률, 같은 색 나머지 판과의 차이와 검정, 15수 시점 형세·시계, 15수 안 실수 프로필, 반복 실수, 패배의 결정적 실수를 붙인다."""
+    out = {}
+    min_n = 5 if len(games) >= 60 else 3
+    for c in "wb":
+        gs = [g for g in games if g["my_color"] == c]
+        if not gs:
+            out[c] = dict(base=None, mine=[], opp=[])
+            continue
+        base = dict(n=len(gs), score=_score([g["outcome"] for g in gs]),
+                    eval15=(lambda v: round(v) if v is not None else None)(_mean([_eval_at(g, EARLY_MOVES) for g in gs])),
+                    clock15=(lambda v: round(v) if v is not None else None)(_mean([_clock_at(g, EARLY_MOVES) for g in gs])),
+                    acc15=acc([p["wp_loss"] for g in gs for p in g["plies"] if p["mine"] and p["move"] <= EARLY_MOVES]),
+                    mist_pg=round(sum(1 for g in gs for p in g["plies"] if p.get("cat") and p["move"] <= EARLY_MOVES) / len(gs), 2))
+        out[c] = dict(base=base)
+        for side, me in (("mine", True), ("opp", False)):
+            white = (c == "w") == me                      # 이 갈래의 수를 두는 쪽이 백인가
+            rows = []
+            for key, v, other in repertoire_groups(gs, me, white, min_n):
+                ids = {id(g) for g in v}
+                rows.append(repertoire_row(key, v, [g for g in gs if id(g) not in ids], base, con, white, me, other))
+            rows.sort(key=lambda r: -r["n"])
+            out[c][side] = rows
+    return out
+
+
+def opening_mistakes(gs):
+    """같은 오프닝 게임들의 15수 안 실수 프로필: 판당 횟수, 처음 틀어지는 수, 수별 분포, 유형별 횟수."""
+    ms = [p for g in gs for p in g["plies"] if p.get("cat") and p["move"] <= EARLY_MOVES]
+    first = [min(m) for m in ([p["move"] for p in g["plies"] if p.get("cat") and p["move"] <= EARLY_MOVES] for g in gs) if m]
+    cnt = Counter(p["cat"] for p in ms)
+    return dict(n=len(ms), per_game=round(len(ms) / len(gs), 2), clean=len(gs) - len(first), first_slip=median(first),
+                by_move=[sum(1 for p in ms if p["move"] == m) for m in range(1, EARLY_MOVES + 1)],
+                cats=[dict(key=k, n=v, cost=round(sum(p["wp_loss"] for p in ms if p["cat"] == k))) for k, v in cnt.most_common()])
 
 
 def opening_path(gs, my_color, start=4, max_plies=16, min_n=3):
@@ -823,7 +1117,8 @@ def opening_trouble(gs, con, max_move=15, top=3):
         w = dict(url=g0["url"], date=g0["date"], opp=g0["opp"], color=g0["my_color"], move=p0["move"], mover=p0["mover"],
                  san=san, best=best, cp_before=p0["cp_before"], cp_after=p0["cp_after"], wp_loss=p0["wp_loss"],
                  clock=p0["clock"], spent=p0["spent"], phase=p0["phase"], fen=fen, n=len(lst), avg_loss=round(avg),
-                 uci=uci_of(fen, san), best_uci=uci_of(fen, best))
+                 uci=uci_of(fen, san), best_uci=uci_of(fen, best), ply=p0["ply"],
+                 cat=Counter(p.get("cat") for p, _ in lst if p.get("cat")).most_common(1)[0][0] if any(p.get("cat") for p, _ in lst) else None)
         w.update(cached_lines(con, fen, san, best) if con else dict(best_line=[], refutation=[], alts=[]))
         try:
             b = chess.Board(fen); b.push_san(san); w["after_fen"] = b.fen()
@@ -954,6 +1249,7 @@ METRICS = {
     "endgame_acc": ("엔드게임 정확도", "pct100", False, False),
     "tilt": ("같은 세션 2연패 직후 판의 승률", "pct", False, True),
     "late_session": ("세션 6판째 이후 판의 승률", "pct", False, True),
+    "cat": ("이 유형의 실수 (판당 횟수)", "num2", True, False),      # arg = 실수 유형 키 (없으면 모든 유형)
 }
 
 
@@ -992,6 +1288,8 @@ def metric_series(games, key, arg=None):
             if g["my_color"] != color or " ".join(p["san"] for p in g["plies"][:4]) != moves:
                 continue
             v, n = {"W": 1, "D": 0.5, "L": 0}[g["outcome"]], 1
+        elif key == "cat":
+            v, n = sum(1 for p in mine if p.get("cat") and (arg is None or p["cat"] == arg)), 1
         elif key == "endgame_acc":
             e = [p["wp_loss"] for p in mine if p["phase"] == "endgame"]
             if len(e) < 5:
@@ -1185,6 +1483,7 @@ def game_id(url):
 def export_game(con, g):
     """게임 하나 → docs/games/<id>.json (game.html 이 읽는다)."""
     plies = g["plies"] if "plies" in g else [dict(r) for r in con.execute("SELECT * FROM plies WHERE url=? ORDER BY ply", (g["url"],))]
+    tag_mistakes(plies)
     board = chess.Board()
     fens = [board.fen()]
     out, lines = [], {}
@@ -1202,6 +1501,8 @@ def export_game(con, g):
         out.append(dict(ply=p["ply"], move=p["move"], mover=p["mover"], mine=int(p["mine"]), san=p["san"], uci=uci,
                         best=p["best"], best_uci=best_uci, cp_before=p["cp_before"], cp_after=p["cp_after"], cp_w=cp_w,
                         loss=p["loss"], wp_loss=p["wp_loss"], clock=p["clock"], spent=p["spent"], cls=cls))
+        if p.get("cat"):
+            out[-1]["cat"] = p["cat"]
         if p["mine"] and cls in ("mist", "blun", "miss"):
             L = cached_lines(con, p["fen"], p["san"], p["best"])
             if L["best_line"] or L["refutation"]:
@@ -1219,13 +1520,20 @@ def export_game(con, g):
     return path
 
 
+GAME_EXPORT_V = "2"    # 게임 상세 JSON 의 형식 버전. 올리면 다음 실행에서 모든 게임을 다시 내보낸다 (2: 실수 유형 cat)
+
+
 def export_missing_games(con):
+    """상세 JSON 이 없는 게임을 내보낸다. 형식 버전이 바뀌었으면 전부 다시."""
     n = 0
-    for g in con.execute("SELECT * FROM games WHERE analyzed=1"):
+    redo = meta_get(con, "game_export_v") != GAME_EXPORT_V
+    for g in con.execute("SELECT * FROM games WHERE analyzed=1").fetchall():
         g = dict(g)
-        if not os.path.exists(os.path.join(DOCS, "games", f"{game_id(g['url'])}.json")):
+        if redo or not os.path.exists(os.path.join(DOCS, "games", f"{game_id(g['url'])}.json")):
             export_game(con, g)
             n += 1
+    if redo:
+        meta_set(con, "game_export_v", GAME_EXPORT_V)
     return n
 
 
@@ -1441,8 +1749,9 @@ def export_puzzles(con, limit=200):
     out = []
     for g in con.execute("SELECT * FROM games WHERE analyzed=1 ORDER BY end_time DESC").fetchall():
         g = dict(g)
-        for p in con.execute("SELECT * FROM plies WHERE url=? AND mine=1 AND wp_loss>=20 ORDER BY ply", (g["url"],)).fetchall():
-            p = dict(p)
+        for p in tag_mistakes([dict(r) for r in con.execute("SELECT * FROM plies WHERE url=? ORDER BY ply", (g["url"],))]):
+            if not p["mine"] or p["wp_loss"] < 20:
+                continue
             if not p["best"] or p["cp_before"] < -300 or p["cp_before"] >= 9000:
                 continue
             r = con.execute("SELECT data FROM lines WHERE fen=? AND played=? AND best=?", (p["fen"], p["san"], p["best"])).fetchone()
@@ -1452,7 +1761,7 @@ def export_puzzles(con, limit=200):
             b = chess.Board(p["fen"])
             w = dict(id=f"{game_id(g['url'])}-{p['ply']}", ply=p["ply"], url=g["url"], date=g["date"], opp=g["opp"], color=g["my_color"],
                      move=p["move"], mover=p["mover"], san=p["san"], best=p["best"], cp_before=p["cp_before"], cp_after=p["cp_after"],
-                     wp_loss=p["wp_loss"], clock=p["clock"], phase=p["phase"], fen=p["fen"],
+                     wp_loss=p["wp_loss"], clock=p["clock"], phase=p["phase"], fen=p["fen"], cat=p.get("cat"),
                      uci=b.parse_san(p["san"]).uci(), best_uci=b.parse_san(p["best"]).uci(),
                      best_line=L["best_line"], refutation=L.get("refutation", []), alts=L.get("alts", []),
                      legal=" ".join(sorted({m.uci()[:4] for m in b.legal_moves})))   # 브라우저가 둘 수 없는 수를 걸러내는 데 쓴다
@@ -1477,9 +1786,19 @@ def render_all(con, cfg):
     payload = dict(username=cfg["CHESSCOM_USERNAME"], generated=now.strftime("%Y-%m-%d %H:%M"),
                    meta=dict(depth=DEPTH, pv_depth=LINE_DEPTH), windows=windows)
     os.makedirs(DOCS, exist_ok=True)
-    json.dump(payload, open(os.path.join(DOCS, "stats.json"), "w"), ensure_ascii=False)
-    write_pieces(DOCS)
     n = export_puzzles(con)
+    pz = Counter(p["cat"] for p in json.load(open(os.path.join(DOCS, "puzzles.json"))) if p.get("cat"))
+    for S in windows.values():
+        for c in (S or {}).get("coach", {}).get("cats", []):
+            c["puzzles"] = pz.get(c["key"], 0)        # 이 유형으로 풀 수 있는 퍼즐 수 (기간과 무관)
+    json.dump(payload, open(os.path.join(DOCS, "stats.json"), "w"), ensure_ascii=False)
+    # 게임·퍼즐 페이지가 읽는 작은 요약: 전체 기간의 집중 과제와 유형별 최근 빈도
+    co = (windows["all"] or {}).get("coach") or dict(cats=[], focus=[], games=0, k=0)
+    json.dump(dict(generated=payload["generated"], games=co["games"], k=co["k"], focus=co["focus"],
+                   cats={c["key"]: dict(n=c["n"], games=c["games"], share=c["share"], recent=c["recent"]["games"], puzzles=c.get("puzzles", 0))
+                         for c in co["cats"]}),
+              open(os.path.join(DOCS, "coach.json"), "w"), ensure_ascii=False, separators=(",", ":"))
+    write_pieces(DOCS)
     open(os.path.join(DOCS, ".nojekyll"), "w").write("")
     open(os.path.join(DOCS, ".code-hash"), "w").write(code_hash())
     log(f"통계 생성: docs/stats.json, 퍼즐 {n}개")

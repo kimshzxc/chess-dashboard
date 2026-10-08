@@ -246,6 +246,26 @@ def run(c, base, server, shots):
     hero = c.rect(".herocard .k", None); c.touch_xy(hero[0], hero[1])
     check("레이팅 그래프: 그래프 밖을 누르면 사라진다", not c.ev(TIP("rchart")))
     snap("home")
+    co = S.get("coach") or {}
+    if co.get("cats"):
+        check("코치 브리핑: 집중 과제 카드가 비중 순으로 나온다", c.ev("document.querySelectorAll('#s-coach .focus').length") == len(co["focus"])
+              and c.ev("[...document.querySelectorAll('#s-coach .focus .shr b')].map(e=>parseFloat(e.textContent))") == [x["share"] for x in co["cats"] if x["key"] in co["focus"]],
+              c.ev("[...document.querySelectorAll('#s-coach .focus .nm b')].map(e=>e.textContent)"))
+        check("코치 브리핑: 직전 판 피드백과 체크리스트", c.ev("!!document.querySelector('#s-coach .lastg')") and c.ev("document.querySelectorAll('#s-coach .checklist li').length") == len(co["focus"]),
+              (c.ev("document.querySelector('#s-coach .lastg .v')?.innerText") or "")[:50])
+        dots = c.ev("[...document.querySelectorAll('#s-coach .focus')].map(f=>[f.querySelectorAll('.seq i').length, f.querySelectorAll('.seq i.hit').length])")
+        want = [[x["recent"]["k"], x["recent"]["games"]] for x in co["cats"] if x["key"] in co["focus"]]
+        check("코치 브리핑: 최근 판 점이 데이터와 같다", dots == want, dots)
+        key = co["focus"][-1]
+        c.tap(f'#s-coach .focus [data-opencat="{key}"]'); c.pump(0.8)
+        check("사례 보기: 복기 탭에서 그 유형이 펼쳐진다", c.ev("document.querySelector('#tabbar a.on')?.dataset.tab") == "mistakes" and c.ev("document.querySelector('#s-cats .cat.open')?.id") == "cat-" + key
+              and c.ev("!!document.querySelector('#s-cats .cat.open .viewer svg.board')") and c.ev("!document.querySelector('#s-cats').hidden"))
+        c.ev("history.back()"); c.pump(0.8)
+        check("뒤로 가면 홈", c.ev("document.querySelector('#tabbar a.on')?.dataset.tab") == "home")
+    if c.ev("!!document.querySelector('#s-coach .repcard .oprow')"):
+        c.tap("#s-coach .repcard .oprow"); ok = c.wait("document.querySelector('#sheet').classList.contains('open') && document.querySelectorAll('#sheet .diag li').length>0", 3)
+        check("홈의 취약·강점 오프닝을 누르면 코칭 시트", ok, c.ev("document.querySelector('#sheet-title').textContent")); snap("home_rep_sheet")
+        c.tap("#sheet-x", None); c.pump(0.4)
     hints = [w for w in S["weaknesses"] if w["level"] == "hint"]
     lv = c.ev("[...document.querySelectorAll('.weak')].map(e=>e.classList.contains('hint'))")
     check("근거 약한 보완점은 '표본 부족'으로 뒤에 모인다", lv == sorted(lv) and sum(lv) == len(hints)
@@ -287,9 +307,45 @@ def run(c, base, server, shots):
             mis = c.ev("""(()=>{let bad=0; for(const k in VIEWERS){ const L=VIEWERS[k].spec.lines.find(l=>l.label==='정답 수순'); if(!L) continue;
                 const cap=L.states[0].caption||''; const m=cap.match(/정답 ([^<\\s]+)/); if(m && L.states[1] && L.states[1].san!==m[1]) bad++; } return bad;})()""")
             check("정답 수와 정답 수순의 첫 수가 같다", mis == 0, f"불일치 {mis}")
+            if co.get("cats"):
+                check("유형 카드 수와 순서가 데이터와 같다", c.ev("[...document.querySelectorAll('#s-cats .cat')].map(e=>e.id.slice(4))") == [x["key"] for x in co["cats"]])
+                snap("cats")
+                k2 = co["cats"][1]["key"] if len(co["cats"]) > 1 else co["cats"][0]["key"]
+                c.tap(f'#cat-{k2} .cath'); c.pump(0.5)
+                check("다른 유형을 누르면 그것만 펼쳐진다", c.ev("[...document.querySelectorAll('#s-cats .cat.open')].map(e=>e.id)") == ["cat-" + k2]
+                      and c.ev(f"document.querySelectorAll('#cat-{k2} .diag li').length") >= 1 and c.ev(f"!!document.querySelector('#cat-{k2} .rule')"))
+                c.tap(f'#cat-{k2} [data-cattrend]'); ok = c.wait("document.querySelector('#sheet').classList.contains('open') && !!document.querySelector('#sheet .verdict')", 3)
+                check("유형의 추이 분석 시트", ok, c.ev("document.querySelector('#sheet-title').textContent")); c.tap("#sheet-x", None); c.pump(0.4)
+            c.ev("window.scrollTo(0,0)"); c.tap('#subtabs button[data-sub="open"]', None); c.pump(0.5)
+            check("오프닝별 보기로 전환", c.ev("!document.querySelector('#s-open').hidden && document.querySelector('#s-cats').hidden") and set(c.ev(VIS)) == {"mistakes"})
+            o = c.ev(OVER); check("가로 넘침 없음 (오프닝별)", o[0] <= o[1], o)
+            ops = S["openings"].get("w") or []
+            R = S.get("repertoire") or {}
+            nrows = sum(len(R[cc][sd]) for cc in "wb" for sd in ("mine", "opp") if R.get(cc) and R[cc].get("base"))
+            if nrows:
+                check("오프닝 성적표: 묶음 수가 데이터와 같다", c.ev("document.querySelectorAll('#s-rep .oprow').length") == nrows, nrows)
+                r0 = R["w"]["mine"][0]
+                check("오프닝 성적표: 첫 줄의 승률", f"{r0['score']}%" == c.ev("document.querySelector('#s-rep .oprow .os b').textContent"), r0["key"])
+                snap("rep")
+                c.tap('#s-rep .oprow[data-rep="w|mine|0"]'); ok = c.wait("document.querySelector('#sheet').classList.contains('open') && document.querySelectorAll('#sheet .diag li').length>0", 3)
+                check("오프닝을 누르면 코칭 시트: 판정·진단·할 일", ok and r0["key"] in c.ev("document.querySelector('#sheet-title').textContent") and c.ev("!!document.querySelector('#sheet .verdict')")
+                      and c.ev("document.querySelectorAll('#sheet .tiles3 .tile').length") == 3, c.ev("document.querySelector('#sheet .verdict')?.innerText.slice(0,60)"))
+                o = c.ev("[document.querySelector('#sheet-body').scrollWidth, document.querySelector('#sheet-body').clientWidth]"); check("가로 넘침 없음 (오프닝 코칭)", o[0] <= o[1], o)
+                if r0["trouble"]:
+                    c.tap("#sheet [data-expand]"); check("코칭 시트의 반복 실수: 보드가 그려진다", c.wait("!!document.querySelector('#sheet .viewer svg.board')", 3))
+                snap("rep_sheet")
+                c.tap("#sheet-x", None); c.pump(0.4)
+            if ops:
+                check("오프닝 프로필: 15수 안 실수와 수별 막대", str(ops[0]["mist"]["per_game"]) in (c.ev("document.querySelector('#op-w .tiles3')?.innerText") or "")
+                      and c.ev("document.querySelectorAll('#op-w .mhist rect').length") == sum(1 for v in ops[0]["mist"]["by_move"] if v), c.ev("document.querySelector('#op-w .tiles3')?.innerText.replace(/\\n/g,' ').slice(0,60)"))
+                snap("openings")
             if c.ev("!!document.querySelector('.opitem[data-op=\"w\"][data-i=\"1\"]')"):
                 c.tap('.opitem[data-op="w"][data-i="1"]')
-                check("오프닝 선택 전환", c.ev("document.querySelector('.opitem[data-op=\"w\"][data-i=\"1\"]').classList.contains('on')"))
+                check("오프닝 선택 전환", c.ev("document.querySelector('.opitem[data-op=\"w\"][data-i=\"1\"]').classList.contains('on')")
+                      and str(ops[1]["mist"]["per_game"]) in (c.ev("document.querySelector('#op-w .tiles3')?.innerText") or ""))
+            c.ev("window.scrollTo(0,0)"); c.tap('#subtabs button[data-sub="worst"]', None); c.pump(0.5)
+            check("큰 실수 보기로 전환", c.ev("!document.querySelector('#s-worst').hidden && document.querySelector('#s-open').hidden"))
+            c.tap('#subtabs button[data-sub="cats"]', None); c.pump(0.4)
         if tab == "stats":
             cut = c.ev("[...document.querySelectorAll('#main>section:not([hidden]) .bar span')].filter(s=>s.getBoundingClientRect().width>0 && s.getBoundingClientRect().right > s.closest('.card').getBoundingClientRect().right-4).length")
             check("막대 옆 글씨가 카드 안에 들어온다", cut == 0, cut)
@@ -316,6 +372,14 @@ def run(c, base, server, shots):
     c.pump(1.5)
     s = c.ev("(()=>{const st=document.querySelector('#strip'),m=st.querySelector('.mv.cur'); const a=st.getBoundingClientRect(), b=m.getBoundingClientRect(); return [a.left,a.right,b.left,b.right]})()")
     check("현재 수가 수 스트립에 보인다", s and s[2] >= s[0] - 1 and s[3] <= s[1] + 1, s)
+    cats = sorted({p["cat"] for p in G["plies"] if p.get("cat")})
+    check("이 판의 교훈: 유형별로 묶인다", c.ev("document.querySelectorAll('#lessons .lesson').length") == len(cats) and c.ev("document.querySelectorAll('#lessons .lmv').length") == sum(1 for p in G["plies"] if p.get("cat")),
+          f"{len(cats)}유형")
+    if cats:
+        c.tap("#lessons .lmv", y_target=640); j = c.ev("+document.querySelector('#lessons .lmv').dataset.jump")
+        check("교훈의 수를 누르면 그 장면으로 가고 유형이 표시된다", c.ev(CUR) == j and c.ev("!!document.querySelector('#info .ctag')"), c.ev("document.querySelector('#info .ctag')?.textContent"))
+        snap("game_lessons")
+        c.ev(f"document.querySelector('#strip .mv[data-jump=\"{ply}\"]').click()"); c.pump(0.3)
     c.tap(".stick .vctl [data-go='1']", None); check("다음 수", c.ev(CUR) == min(n, ply + 1))
     c.tap(".stick .vctl [data-go='0']", None); check("처음으로", c.ev(CUR) == 0)
     c.tap(".stick .vctl [data-go='9']", None); check("끝으로", c.ev(CUR) == n)
@@ -445,6 +509,23 @@ def run(c, base, server, shots):
         check("오늘의 묶음을 마치면 끝 화면", "오늘의 퍼즐 끝" in (c.ev("document.querySelector('#main').innerText") or ""))
         c.tap("#more"); c.pump(0.6)
         check("더 풀기로 추가 문제", c.ev("!!document.querySelector('#pzboard svg.board')") or "모두 풀었습니다" in (c.ev("document.querySelector('#main').innerText") or ""), (c.ev("document.querySelector('.prog')?.innerText") or "").replace("\n", " "))
+        pcats = {}
+        for x in puzzles:
+            if x.get("cat"):
+                pcats[x["cat"]] = pcats.get(x["cat"], 0) + 1
+        if pcats:
+            k = max(pcats, key=pcats.get); day0 = c.ev(LS("puzzle-day")); hist1 = c.ev(LS("puzzle-history"))
+            check("유형 연습 페이지가 뜬다", c.go(base + f"puzzle.html?cat={k}" + q("?"), "!!document.querySelector('#pzboard svg.board')")
+                  and f"/ {pcats[k]}" in (c.ev("document.querySelector('.prog').innerText") or ""), (c.ev("document.querySelector('.prog').innerText") or "").replace("\n", " "))
+            o = c.ev(OVER); check("가로 넘침 없음 (유형 연습)", o[0] <= o[1], o)
+            td = c.ev("JSON.parse(sessionStorage.getItem('puzzle-practice'))")
+            check("유형 연습은 그 유형의 퍼즐만 낸다", td and len(td["ids"]) == pcats[k] and all(BYID[i]["cat"] == k for i in td["ids"]))
+            pp = td["pz"][td["ids"][0]]; center_board(); tap_sq(pp, pp["best_uci"][:2]); tap_sq(pp, pp["best_uci"][2:4]); c.pump(0.5)
+            check("유형 연습 채점: 정답과 유형·규칙 표시", c.ev("!!document.querySelector('#pzresult .result.ok')") and c.ev("!!document.querySelector('#pzresult .result .ctag')"))
+            hist2 = c.ev(LS("puzzle-history"))
+            check("유형 연습은 오늘의 묶음을 건드리지 않고 기록에는 남는다", c.ev(LS("puzzle-day")) == day0 and sum(h["n"] for h in hist2.values()) == sum(h["n"] for h in hist1.values()) + 1)
+            snap("puzzle_practice")
+            check("모드 칩으로 오늘의 퍼즐로 돌아간다", c.ev("document.querySelector('.pzmodes a').getAttribute('href')") == "puzzle.html" and c.ev("document.querySelector('.pzmodes a.on')?.getAttribute('href')") == f"puzzle.html?cat={k}")
         errs = c.errors(); check("퍼즐 페이지에서 오류 없음", not errs, errs[:4])
         c.go(base + "index.html" + q(), "!!document.querySelector('.pz')")
         check("홈의 퍼즐 카드에 연속 일수", "연속" in (c.ev("document.querySelector('.pz').innerText") or ""))

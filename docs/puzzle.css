@@ -37,3 +37,8 @@ header{position:static;border-bottom:0;padding:calc(14px + env(safe-area-inset-t
 .toast{max-width:440px;margin:8px auto 0;text-align:center;font-size:13.5px;font-weight:600;color:var(--warning);min-height:20px;opacity:0;transition:opacity .15s}
 .toast.on{opacity:1}
 .done .acts{margin-top:16px}
+/* 모드 선택: 오늘의 퍼즐 / 실수 유형별 연습 */
+.pzmodes{display:flex;gap:8px;overflow-x:auto;margin:0 -16px;padding:2px 16px 4px;scrollbar-width:none}
+.pzmodes::-webkit-scrollbar{display:none}
+.pzmodes a{flex:none;display:inline-flex;align-items:center;min-height:38px;padding:0 14px;border-radius:999px;border:1px solid var(--line2);background:var(--surface);color:var(--text2);font-size:13.5px;font-weight:600;white-space:nowrap}
+.pzmodes a.on{background:var(--me-soft);border-color:var(--me);color:var(--text)}

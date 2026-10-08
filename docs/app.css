@@ -104,3 +104,65 @@ td.n,th.n{text-align:right;white-space:nowrap}
 .weak.hint .t{color:var(--text2)}
 .weak.hint p{font-size:14px}
 .evnote{font-size:13px;color:var(--text2);background:var(--surface2);border-radius:10px;padding:9px 12px;margin-bottom:10px;line-height:1.5}
+/* ---------- 코치 브리핑·실수 유형 ---------- */
+#s-coach{margin-top:16px}
+.lastg{display:block;color:inherit;border-color:var(--line2)}
+.lastg .h{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.lastg .k,.checklist .k{font-size:12.5px;color:var(--text2);font-weight:600}
+.lastg b{font-size:16px}
+.lastg .go{font-size:13.5px;font-weight:600;color:var(--me-ink);white-space:nowrap}
+.lastg .v{font-size:14.5px;line-height:1.5;margin-top:8px;color:var(--text2)}
+.lastg .v b{color:var(--text)}
+.focus .fh{display:flex;align-items:flex-start;gap:12px}
+.focus .rk{flex:none;width:28px;height:28px;border-radius:50%;background:var(--me-soft);color:var(--me-ink);font-weight:800;font-size:14px;display:flex;align-items:center;justify-content:center;margin-top:1px}
+.focus .nm{flex:1;min-width:0}
+.focus .nm b{font-size:17px;line-height:1.3}
+.focus .shr{flex:none;text-align:right;line-height:1.15}
+.focus .shr b{display:block;font-size:22px;font-weight:800;letter-spacing:-.03em}
+.focus .shr span{font-size:11px;color:var(--muted)}
+.fline{display:flex;align-items:center;gap:8px 10px;flex-wrap:wrap;font-size:13.5px;color:var(--text2);margin-top:12px}
+.fline b{color:var(--text)}
+.seq{display:inline-flex;gap:3px;flex:none}
+.seq i{width:9px;height:9px;border-radius:50%;background:var(--line2);display:block}
+.seq i.hit{background:var(--s1)}
+.focus .links,.cact{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.focus .links .btn,.cact .btn{min-height:40px;font-size:14px;padding:0 14px}
+.checklist ol{margin:8px 0 10px;padding-left:22px;font-size:15.5px;font-weight:600;line-height:1.5}
+.checklist li{padding:3px 0}
+.subnav{margin-top:16px}
+.subnav+section{margin-top:18px}
+.cat{padding:0;overflow:hidden}
+.cath{padding:14px 16px;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.cath .ct{display:flex;align-items:center;gap:8px}
+.cath .ct b{font-size:15.5px;min-width:0}
+.cath .ct .shr{margin-left:auto;font-weight:800;font-size:16px}
+.cbar{height:8px;border-radius:4px;background:var(--surface2);margin:8px 0 7px;overflow:hidden}
+.cbar i{display:block;height:100%;border-radius:0 4px 4px 0;background:var(--s1)}
+.cath .sub .chip{margin-left:4px}
+.catb{padding:0 16px}
+.cat.open .catb{padding-bottom:14px;border-top:1px solid var(--line)}
+.cat.open .cath{background:var(--surface2)}
+.diag{margin:10px 0 0;padding-left:20px;font-size:14px;line-height:1.55;color:var(--text2)}
+.diag li{padding:2px 0}.diag b{color:var(--text)}
+.tiles3 .tile .v small{font-size:13px;font-weight:600;color:var(--text2);letter-spacing:0;margin-left:2px}
+.mhist{width:100%;height:auto;display:block}
+.mhist text{font-family:inherit}
+.game .s .ctag{margin-right:2px}
+/* ---------- 오프닝 성적표 ---------- */
+.repcard .k{font-size:12.5px;color:var(--text2);font-weight:600;margin:14px 0 2px}
+.repcard h3+.k{margin-top:4px}
+.oprow{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--line);cursor:pointer;-webkit-tap-highlight-color:transparent}
+.oprow:last-child{border-bottom:0}
+.oprow .om{flex:1;min-width:0}
+.oprow .ok{font-size:15px;font-weight:600}
+.oprow .nm{color:var(--text2);font-size:12.5px;margin-top:2px;line-height:1.4}
+.oprow .wdl{margin-top:6px;height:5px}
+.oprow .os{flex:none;display:flex;flex-direction:column;align-items:flex-end;gap:4px}
+.oprow .os b{font-size:18px;font-weight:800;letter-spacing:-.02em}
+.repcard .more{padding-top:10px}
+.sheet-b h3{margin-top:18px}
+.sheet-b .diag.card{padding:12px 14px 12px 32px;margin:0 0 12px}
+.sheet-b .checklist ol{margin:0;font-size:14.5px;font-weight:500}
+.sheet-b .checklist{margin-bottom:12px}
+.rv{display:flex;justify-content:space-between;gap:10px;padding:10px 0;border-bottom:1px solid var(--line);color:inherit;font-size:14.5px}
+.rv:last-child{border-bottom:0}

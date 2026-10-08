@@ -8,7 +8,7 @@
 import argparse, io, os, sys, tarfile, urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-GENERATED = ("data/chess.db", "docs/stats.json", "docs/puzzles.json", "docs/pieces.svg", "docs/.code-hash", "docs/.nojekyll", "docs/games/")
+GENERATED = ("data/chess.db", "docs/stats.json", "docs/puzzles.json", "docs/coach.json", "docs/pieces.svg", "docs/.code-hash", "docs/.nojekyll", "docs/games/")
 
 
 def main():
