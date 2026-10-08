@@ -28,6 +28,10 @@ DEPTH = 18
 REANALYZE_BATCH = 15   # 깊이가 바뀌면 한 번 실행에 이만큼씩 다시 분석 (새 게임이 항상 먼저)
 LINE_DEPTH = 18        # 실수 국면의 정답/반격 수순 깊이 (수 평가와 같은 깊이여야 정답 수와 수순이 어긋나지 않는다)
 LINES_BATCH = 40       # 한 번 실행에 수순을 계산할 국면 수 (최근 게임부터)
+BOOK_DEPTH = 16        # 오프닝 연습 라인의 국면 평가 깊이 (상위 3수)
+BOOK_BATCH = 150       # 한 번 실행에 오프닝 연습용으로 평가할 국면 수
+BOOK_LINES = 4         # 오프닝 하나에 만드는 라인 수 (메인라인 + 상대가 자주 두는 갈래)
+BOOK_MIN_N = 8         # 이 판 수 이상이거나 취약한 오프닝에 연습 라인을 만든다
 ALT_WP = 5.0           # 최선 수와 승률 차이가 이 안(%p)이면 같이 좋은 수로 인정
 WORKERS = 3
 UA = "chess-dashboard/1.0 (personal analysis; github.com/{owner}/{repo})"
@@ -83,6 +87,7 @@ def db():
     CREATE INDEX IF NOT EXISTS plies_url ON plies(url);
     CREATE TABLE IF NOT EXISTS lines(fen TEXT, played TEXT, best TEXT, data TEXT, PRIMARY KEY(fen, played, best));
     CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT);
+    CREATE TABLE IF NOT EXISTS book(fen TEXT PRIMARY KEY, depth INTEGER, data TEXT);
     """)
     cols = {r[1] for r in con.execute("PRAGMA table_info(games)")}
     if "pushed" not in cols:
@@ -987,7 +992,11 @@ def _mean(v):
     return sum(v) / len(v) if v else None
 
 
-def repertoire_row(key, gs, rest, base, con, white, me, other):
+def repertoire_id(c, side, key):
+    return f"{c}-{side}-{'_'.join(key)}"
+
+
+def repertoire_row(key, gs, rest, base, con, white, me, other, rid=None):
     cc = Counter(g["outcome"] for g in gs)
     n = len(gs)
     score = round((cc["W"] + 0.5 * cc["D"]) / n * 100, 1)
@@ -1007,7 +1016,7 @@ def repertoire_row(key, gs, rest, base, con, white, me, other):
     dec = [p for p in dec if p and p["wp_loss"] >= MISTAKE_WP]
     recent_l = sorted(losses, key=lambda g: -g["end_time"])[:3]
     return dict(
-        key=_key_label(key, white), other=other, name=opening_name_ko(Counter(g["eco_name"] for g in gs).most_common(1)[0][0]),
+        id=rid, key=_key_label(key, white), other=other, name=opening_name_ko(Counter(g["eco_name"] for g in gs).most_common(1)[0][0]),
         n=n, win=cc["W"], draw=cc["D"], loss=cc["L"], score=score, diff=diff, verdict=verdict, ev=ev,
         eval15=round(e15) if e15 is not None else None, clock15=round(c15) if c15 is not None else None,
         acc15=acc([p["wp_loss"] for p in early]),
@@ -1039,10 +1048,189 @@ def repertoire_stats(games, con=None):
             rows = []
             for key, v, other in repertoire_groups(gs, me, white, min_n):
                 ids = {id(g) for g in v}
-                rows.append(repertoire_row(key, v, [g for g in gs if id(g) not in ids], base, con, white, me, other))
+                rows.append(repertoire_row(key, v, [g for g in gs if id(g) not in ids], base, con, white, me, other,
+                                           repertoire_id(c, side, key)))
             rows.sort(key=lambda r: -r["n"])
             out[c][side] = rows
     return out
+
+
+# ---------------------------------------------------------------- 오프닝 연습 라인 (docs/book.json, train.html 이 읽는다)
+# 오프닝 묶음마다 내 15수째까지의 라인을 몇 개 만든다.
+#   상대의 수: 그 묶음의 내 게임에서 그 국면에 가장 자주 나온 수 (메인라인). 둘째·셋째로 잦은 수는 갈래 라인이 된다.
+#              게임에 없는 국면부터는 엔진의 최선 수.
+#   내 수:     평소 두던 수가 엔진 최선과 승률 차이 ALT_WP 안이면 그 수를 그대로 가르치고, 아니면 엔진 최선으로 바꾼다
+#              (그 자리에는 "평소 X 를 뒀다"는 표시가 붙는다).
+# 엔진 평가는 book 테이블에 국면별로 쌓아 두므로, 게임이 늘어 라인이 바뀌어도 새 국면만 계산한다.
+def book_eval(con, fen, eng, budget):
+    """국면의 상위 3수 [{san, uci, cp, reply}]. 캐시에 없고 엔진·예산도 없으면 None."""
+    r = con.execute("SELECT data FROM book WHERE fen=? AND depth=?", (fen, BOOK_DEPTH)).fetchone()
+    if r:
+        return json.loads(r[0])
+    if eng is None or budget[0] <= 0:
+        return None
+    budget[0] -= 1
+    b = chess.Board(fen)
+    infos = eng.analyse(b, chess.engine.Limit(depth=BOOK_DEPTH), multipv=3)
+    data = [dict(san=b.san(i["pv"][0]), uci=i["pv"][0].uci(), cp=cp_of(i["score"], b.turn),
+                 reply=(lambda b2, pv: b2.san(pv[1]) if len(pv) > 1 and (b2.push(pv[0]) or True) else None)(b.copy(), i["pv"]))
+            for i in infos if i.get("pv")]
+    con.execute("INSERT OR REPLACE INTO book(fen,depth,data) VALUES(?,?,?)", (fen, BOOK_DEPTH, json.dumps(data, separators=(",", ":"))))
+    return data
+
+
+def _position_index(gs):
+    """국면 → 그 국면에서 내가 둔 수(횟수·승률 손해)와 상대가 둔 수(횟수). 15수째까지만."""
+    idx = defaultdict(lambda: dict(mine=Counter(), loss=defaultdict(list), opp=Counter()))
+    for g in gs:
+        for p in g["plies"]:
+            if p["move"] > EARLY_MOVES:
+                break
+            e = idx[p["fen"]]
+            if p["mine"]:
+                e["mine"][p["san"]] += 1
+                e["loss"][p["san"]].append(p["wp_loss"])
+            else:
+                e["opp"][p["san"]] += 1
+    return idx
+
+
+def book_line(con, eng, budget, c, key, key_mine, grp_idx, all_idx, alt=None):
+    """라인 하나. alt=(수 순번, san) 이면 그 자리에서 상대가 그 수를 두는 갈래.
+    (수 목록, 메인라인에서 갈라질 수 있는 상대 수 [(횟수, 순번, san)], 끝까지 만들어졌는가) 를 돌려준다."""
+    b = chess.Board()
+    out, branches, my_n, reply, complete = [], [], 0, None, True
+    while my_n < EARLY_MOVES and not b.is_game_over():
+        mine = (b.turn == chess.WHITE) == (c == "w")
+        fen, i, kidx = b.fen(), len(out), b.fullmove_number - 1
+        node = dict(mine=int(mine))
+        if mine == key_mine and kidx < len(key):
+            san = key[kidx]                                   # 이 오프닝을 정의하는 수
+        elif not mine:
+            cands = [(s, n) for s, n in grp_idx[fen]["opp"].most_common() if n >= 2] if fen in grp_idx else []
+            if alt and alt[0] == i:
+                san = alt[1]
+                node["n"] = dict(cands).get(san)
+            elif cands:
+                san, node["n"] = cands[0]
+                branches += [(n, i, s) for s, n in cands[1:3]]
+            elif reply:
+                san, node["eng"] = reply, 1                    # 게임에 없는 국면: 엔진이 예상한 응수
+            else:
+                ev = book_eval(con, fen, eng, budget)
+                if not ev:
+                    complete = False
+                    break
+                san, node["eng"] = ev[0]["san"], 1
+        else:
+            ev = book_eval(con, fen, eng, budget)
+            if not ev:
+                complete = False
+                break
+            ok = [e for e in ev if winpct(ev[0]["cp"]) - winpct(e["cp"]) <= ALT_WP]
+            san, node["cp"] = ev[0]["san"], ev[0]["cp"]
+            e = grp_idx[fen] if fen in grp_idx and grp_idx[fen]["mine"] else all_idx.get(fen)   # 이 오프닝의 판이 먼저, 없으면 같은 색 전체
+            if e and e["mine"]:
+                us, un = e["mine"].most_common(1)[0]
+                avg = sum(e["loss"][us]) / len(e["loss"][us])
+                hit = next((x for x in ok if x["san"] == us), None)
+                if hit or avg <= ALT_WP:                      # 평소 두던 수가 충분히 좋으면 그 수로 가르친다
+                    san, node["mineN"] = us, un
+                    if hit:
+                        node["cp"] = hit["cp"]
+                elif un >= 2 or avg >= MISTAKE_WP:            # 평소 두던 수가 나쁘다: 고칠 자리
+                    node["bad"] = dict(san=us, uci=uci_of(fen, us), n=un, loss=round(avg, 1))
+            node["ok"] = [dict(san=x["san"], uci=x["uci"]) for x in ok if x["san"] != san]
+            reply = next((x.get("reply") for x in ev if x["san"] == san), None)
+        try:
+            mv = b.parse_san(san)
+        except Exception:                                     # 이 진행에서는 둘 수 없는 수: 라인을 여기서 끝낸다
+            break
+        node.update(san=san, uci=mv.uci(), move=b.fullmove_number, mover="w" if b.turn == chess.WHITE else "b")
+        b.push(mv)
+        node["fen"] = b.fen()
+        out.append(node)
+        if mine:
+            my_n += 1
+        else:
+            reply = None
+    return out, branches, complete
+
+
+def book_targets(games):
+    """연습 라인을 만들 오프닝 묶음 (전체 기간 기준). 취약한 것부터."""
+    rep = repertoire_stats(games)
+    min_n = 5 if len(games) >= 60 else 3
+    out = []
+    for c in "wb":
+        gs = [g for g in games if g["my_color"] == c]
+        for side, me in (("mine", True), ("opp", False)):
+            white = (c == "w") == me
+            groups = {repertoire_id(c, side, key): (key, v) for key, v, other in repertoire_groups(gs, me, white, min_n) if not other}
+            for r in rep[c][side]:
+                if r["id"] in groups and (r["n"] >= BOOK_MIN_N or r["verdict"].startswith("weak")):
+                    key, v = groups[r["id"]]
+                    out.append(dict(row=r, c=c, side=side, me=me, key=key, gs=v, all=gs))
+    out.sort(key=lambda t: (not t["row"]["verdict"].startswith("weak"), -t["row"]["n"]))
+    return out
+
+
+def build_book(con, games, eng=None, limit=0):
+    """오프닝 연습 라인을 만든다. eng 가 있으면 캐시에 없는 국면을 limit 개까지 평가한다.
+    ({id: 오프닝}, 새로 평가한 국면 수, 아직 덜 만들어진 오프닝 수) 를 돌려준다. 덜 만들어진 오프닝은 결과에서 뺀다."""
+    budget = [limit]
+    book, pending, idx_cache = {}, 0, {}
+    for t in book_targets(games):
+        c, r = t["c"], t["row"]
+        if c not in idx_cache:
+            idx_cache[c] = _position_index(t["all"])
+        grp_idx = _position_index(t["gs"])
+        args = (con, eng, budget, c, t["key"], t["me"], grp_idx, idx_cache[c])
+        main, branches, ok = book_line(*args)
+        lines = [dict(name="메인라인", note="내 게임에서 상대가 가장 자주 둔 수로 진행", plies=main)]
+        seen = set()
+        for n, i, san in sorted(branches, key=lambda x: (-x[0], x[1])):
+            if len(lines) >= BOOK_LINES or (i, san) in seen:
+                continue
+            seen.add((i, san))
+            pl, _, ok2 = book_line(*args, alt=(i, san))
+            ok = ok and ok2
+            at = pl[i] if i < len(pl) else None
+            if at:
+                lines.append(dict(name=f"{at['move']}{'.' if at['mover'] == 'w' else '…'}{san} 갈래", note=f"상대가 {at['move']}수째에 {san} 로 나올 때 (내 게임 {n}판)",
+                                  at=i, plies=pl))
+        if not ok:
+            pending += 1
+            continue
+        lines = [ln for ln in lines if sum(p["mine"] for p in ln["plies"]) >= 6]      # 너무 일찍 끝난 라인은 뺀다
+        if not lines:
+            continue
+        for ln in lines:
+            last = next((p for p in reversed(ln["plies"]) if p.get("cp") is not None), None)
+            ln["cp"] = last["cp"] if last else None
+            ln["fix"] = sum(1 for p in ln["plies"] if p.get("bad"))
+        book[r["id"]] = dict(id=r["id"], key=r["key"], color=c, side=t["side"], name=r["name"], n=r["n"], score=r["score"],
+                             verdict=r["verdict"], lines=lines)
+    con.commit()
+    return book, limit - budget[0], pending
+
+
+def enrich_book(con, cfg, limit=BOOK_BATCH):
+    """오프닝 연습 라인에 필요한 국면을 엔진으로 평가해 book 테이블에 쌓는다. (평가한 국면 수, 덜 만들어진 오프닝 수)"""
+    games = load_games(con)
+    if not games:
+        return 0, 0
+    _, _, pending = build_book(con, games)
+    if not pending:
+        return 0, 0
+    eng = chess.engine.SimpleEngine.popen_uci(stockfish_path(cfg))
+    eng.configure({"Hash": 128, "Threads": WORKERS})
+    try:
+        _, n, pending = build_book(con, games, eng, limit)
+    finally:
+        eng.quit()
+    log(f"오프닝 연습 라인: 국면 {n}개 평가 (덜 만들어진 오프닝 {pending}개, depth {BOOK_DEPTH})")
+    return n, pending
 
 
 def opening_mistakes(gs):
@@ -1778,8 +1966,10 @@ def render_all(con, cfg):
     """통계 JSON 과 기물 스프라이트를 docs/ 에 쓴다. HTML/CSS/JS 는 docs/ 의 정적 파일."""
     from render import write_pieces
     now = datetime.now(KST)
+    games_all = load_games(con)
+    book = build_book(con, games_all)[0] if games_all else {}
     windows = {
-        "all": compute_stats(load_games(con), con),
+        "all": compute_stats(games_all, con),
         "30d": compute_stats(load_games(con, int((now - timedelta(days=30)).timestamp())), con),
         "7d": compute_stats(load_games(con, int((now - timedelta(days=7)).timestamp())), con),
     }
@@ -1791,6 +1981,12 @@ def render_all(con, cfg):
     for S in windows.values():
         for c in (S or {}).get("coach", {}).get("cats", []):
             c["puzzles"] = pz.get(c["key"], 0)        # 이 유형으로 풀 수 있는 퍼즐 수 (기간과 무관)
+        for c in "wb":
+            for side in ("mine", "opp"):
+                for r in ((S or {}).get("repertoire", {}).get(c) or {}).get(side, []):
+                    r["book"] = len(book[r["id"]]["lines"]) if r["id"] in book else 0     # 연습 라인 수
+    json.dump(dict(generated=payload["generated"], depth=BOOK_DEPTH, moves=EARLY_MOVES, openings=book),
+              open(os.path.join(DOCS, "book.json"), "w"), ensure_ascii=False, separators=(",", ":"))
     json.dump(payload, open(os.path.join(DOCS, "stats.json"), "w"), ensure_ascii=False)
     # 게임·퍼즐 페이지가 읽는 작은 요약: 전체 기간의 집중 과제와 유형별 최근 빈도
     co = (windows["all"] or {}).get("coach") or dict(cats=[], focus=[], games=0, k=0)
@@ -1861,15 +2057,23 @@ def main():
         lines_n, lines_urls = enrich_lines(con, cfg)
     except Exception as e:
         log(f"수순 계산 실패: {e}")
+    index = os.path.join(DOCS, "stats.json")
+    code_changed = os.path.exists(index) and _read_code_hash() != code_hash()
+    # 오프닝 연습 라인: 새 게임이 들어왔거나 코드가 바뀌었거나 지난번에 다 못 만들었을 때만 본다
+    book_n = 0
+    if new_done or code_changed or a.render_only or meta_get(con, "book_pending") != "0":
+        try:
+            book_n, book_left = enrich_book(con, cfg)
+            meta_set(con, "book_pending", "1" if book_left and book_n else "0")   # 더 평가할 것이 없는데 남았으면 그만둔다
+        except Exception as e:
+            log(f"오프닝 연습 라인 계산 실패: {e}")
     if new_done:
         con.commit()
         con.execute("VACUUM")   # 커밋되는 DB 파일을 작게 유지
     pending_notify = [dict(r) for r in con.execute("SELECT * FROM games WHERE analyzed=1 AND notified=0")]
-    index = os.path.join(DOCS, "stats.json")
-    code_changed = os.path.exists(index) and _read_code_hash() != code_hash()
     if code_changed:
         log("코드가 바뀌어 통계를 다시 만듭니다")
-    rendered = bool(new_done or lines_n or a.render_only or code_changed or not os.path.exists(index))
+    rendered = bool(new_done or lines_n or book_n or a.render_only or code_changed or not os.path.exists(index))
     if rendered:
         # 수순이 새로 계산된 게임의 상세 JSON 은 다시 내보낸다
         for url in set(new_done) | lines_urls:

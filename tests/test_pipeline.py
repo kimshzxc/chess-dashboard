@@ -191,6 +191,41 @@ class WithDb(unittest.TestCase):
         self.assertEqual(coach["focus"], stats["focus"])
         self.assertEqual(set(coach["cats"]), {c["key"] for c in stats["cats"]})
 
+    def test_book_cache_and_budget(self):
+        import chess
+
+        class Eng:                                     # 엔진 대역: 합법 수 앞의 3개를 차례로 돌려준다
+            calls = 0
+
+            def analyse(self, b, limit, multipv=1):
+                Eng.calls += 1
+                out = []
+                for i, m in enumerate(list(b.legal_moves)[:multipv]):
+                    b2 = b.copy(); b2.push(m)
+                    out.append(dict(pv=[m, next(iter(b2.legal_moves))], score=chess.engine.PovScore(chess.engine.Cp(30 - 10 * i), b.turn)))
+                return out
+        budget = [1]
+        ev = pipeline.book_eval(self.con, START, Eng(), budget)
+        self.assertEqual((len(ev), budget[0], ev[0]["cp"]), (3, 0, 30))
+        self.assertTrue(ev[0]["reply"])
+        self.assertIsNone(pipeline.book_eval(self.con, AFTER_E4, Eng(), budget))          # 예산이 없으면 계산하지 않는다
+        self.assertEqual(pipeline.book_eval(self.con, START, None, [0]), ev)              # 캐시에서
+        self.assertEqual(Eng.calls, 1)
+        self.assertEqual(pipeline.build_book(self.con, pipeline.load_games(self.con)), ({}, 0, 0))   # 2수짜리 가짜 게임에는 만들 오프닝이 없다
+        from collections import defaultdict
+        key = ("e4", "Nf3", "Bc4")
+        short, _, done = pipeline.book_line(self.con, None, [0], "w", key, True, {}, {})
+        self.assertFalse(done); self.assertEqual([p["san"] for p in short], ["e4"])        # 엔진 없이는 캐시가 끝나는 데서 멈춘다
+        plies, branches, done = pipeline.book_line(self.con, Eng(), [1000], "w", key, True, {}, {})
+        self.assertTrue(done); self.assertEqual(branches, [])
+        self.assertEqual(sum(p["mine"] for p in plies), pipeline.EARLY_MOVES)
+        self.assertEqual([p["san"] for p in plies if p["mine"]][:3], list(key))
+        b = chess.Board()
+        for p in plies:                                                                   # 라인의 수는 모두 둘 수 있는 수이고 fen 이 이어진다
+            b.push_uci(p["uci"]); self.assertEqual(b.fen(), p["fen"])
+        again, _, done = pipeline.book_line(self.con, None, [0], "w", key, True, {}, {})
+        self.assertTrue(done); self.assertEqual(again, plies)                              # 다시 만들 때는 캐시만으로
+
     def test_cached_lines_fallback(self):
         self.con.execute("CREATE TABLE pv_cache(fen TEXT, played TEXT, data TEXT, PRIMARY KEY(fen, played))")
         old = dict(best_line=[dict(san="c4", uci="c2c4", fen="x")], refutation=[dict(san="e5", uci="e7e5", fen="y")])

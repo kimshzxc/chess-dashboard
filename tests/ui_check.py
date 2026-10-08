@@ -528,6 +528,65 @@ def run(c, base, server, shots):
         c.go(base + "index.html" + q(), "!!document.querySelector('.pz')")
         check("홈의 퍼즐 카드에 연속 일수", "연속" in (c.ev("document.querySelector('.pz').innerText") or ""))
 
+    # ------------------------------------------------------------ 오프닝 연습
+    print("== 오프닝 연습")
+    try:
+        book = fetch_json("book.json").get("openings", {})
+    except Exception:
+        book = {}
+    if not book:
+        check("연습 라인이 없으면 안내문", c.go(base + "train.html" + q(), "!!document.querySelector('#main .empty')"))
+    else:
+        check("오프닝 연습 목록", c.go(base + "train.html" + q(), "document.querySelectorAll('.trow').length>0") and c.ev("document.querySelectorAll('.trow').length") == len(book))
+        o = c.ev(OVER); check("가로 넘침 없음 (연습 목록)", o[0] <= o[1], o)
+        ob = next(iter(book.values())); oid = ob["id"]; ln = ob["lines"][0]; P = ln["plies"]; black = ob["color"] == "b"
+        TREADY = "!!document.querySelector('#tboard svg.board') && document.querySelector('.prog b')?.textContent==='내 차례'"
+        url = base + "train.html?o=" + urllib.request.quote(oid) + q("?")
+        check("연습 페이지가 뜨고 내 차례까지 진행된다", c.go(url, TREADY) and c.ev("document.querySelectorAll('.pzmodes a').length") == len(ob["lines"]), ob["key"])
+        o = c.ev(OVER); check("가로 넘침 없음 (연습)", o[0] <= o[1], o)
+
+        def tsq(sq):
+            c.ev("document.querySelector('#tboard').scrollIntoView({block:'center',behavior:'instant'})"); c.pump(0.15)
+            r = c.ev("(()=>{const r=document.querySelector('#tboard svg.board').getBoundingClientRect(); return [r.left,r.top,r.width]})()")
+            fx, ry = FILES.index(sq[0]), 8 - int(sq[1])
+            if black:
+                fx, ry = 7 - fx, 7 - ry
+            c.tap_xy(r[0] + (fx + 0.5) * r[2] / 8, r[1] + (ry + 0.5) * r[2] / 8, settle=0.2)
+
+        def shown():
+            dom = c.ev("[...document.querySelectorAll('#tboard svg.board use')].filter(u=>u.hasAttribute('x')).map(u=>[u.getAttribute('href').split('-').pop(), +u.getAttribute('x'), +u.getAttribute('y')])")
+            return set(map(tuple, dom or []))
+        mine = [i for i, p in enumerate(P) if p["mine"]]
+        i0 = mine[0]
+        startfen = P[i0 - 1]["fen"] if i0 else "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+        check("판이 내 첫 차례의 국면이다", shown() == fen_set(startfen, black))
+        brd = chess.Board(startfen); good = {P[i0]["uci"][:4]} | {x["uci"][:4] for x in P[i0].get("ok", [])}
+        bad = next(m.uci() for m in brd.legal_moves if m.uci()[:4] not in good and not brd.piece_at(m.to_square))
+        tsq(bad[:2]); tsq(bad[2:4]); c.pump(0.3)
+        check("라인에 없는 수는 받지 않는다", c.ev("document.querySelector('#tmsg').classList.contains('ng')") and shown() == fen_set(startfen, black), c.ev("document.querySelector('#tmsg').innerText")[:40])
+        for i in mine:
+            c.wait("document.querySelector('.prog b')?.textContent==='내 차례'", 6)
+            tsq(P[i]["uci"][:2]); tsq(P[i]["uci"][2:4]); c.pump(0.25)
+        ok = c.wait("document.querySelector('.prog b')?.textContent==='라인 끝'", 8)
+        check("정답 수를 끝까지 두면 라인이 끝난다", ok and shown() == fen_set(P[-1]["fen"], black), f"{len(mine)}수")
+        dn = c.ev(LS("train-done")) or {}
+        check("완료 기록: 틀린 수가 있었으므로 '실수 없이'는 아니다", dn.get(oid, {}).get("0", {}).get("n") == 1 and dn[oid]["0"]["clean"] == 0, dn.get(oid))
+        snap("train_done")
+        c.tap("#again"); c.wait(TREADY, 6)
+        c.tap("#show"); c.pump(0.3)
+        check("정답 보기: 화살표가 뜬다", c.ev("document.querySelectorAll('#tboard svg.board polygon').length") == 1)
+        snap("train")
+        if len(ob["lines"]) > 1:
+            c.tap('.pzmodes a[data-line="1"]'); c.wait(TREADY, 6)
+            check("다른 라인으로 전환", c.ev("document.querySelector('.pzmodes a.on').dataset.line") == "1" and "l=1" in c.ev("location.search"))
+        errs = c.errors(); check("오프닝 연습에서 오류 없음", not errs, errs[:4])
+        rid, rep_id = next(((r["id"], f"{cc}|{sd}|{i}") for cc in "wb" for sd in ("mine", "opp") for i, r in enumerate((S.get("repertoire", {}).get(cc) or {}).get(sd, [])) if r.get("book")), (None, None))
+        if rid:
+            c.go(base + "index.html" + q() + "#stats", READY); c.pump(0.6)
+            c.tap(f'#s-rep .repcard:not(#rep-sum) .oprow[data-rep="{rep_id}"]'); c.wait("document.querySelector('#sheet').classList.contains('open')", 4)
+            check("오프닝 코칭 시트에 연습 링크", (c.ev("document.querySelector('#sheet .trainlink')?.getAttribute('href')") or "").endswith(urllib.request.quote(rid, safe="")), c.ev("document.querySelector('#sheet .trainlink')?.getAttribute('href')"))
+            c.tap("#sheet-x", None)
+
     # ------------------------------------------------------------ 설치형 웹앱
     print("== 설치형 웹앱")
     c.go(base + "index.html" + q(), READY)

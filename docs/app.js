@@ -302,7 +302,7 @@ const repOf=(S,id)=>{ const [c,side,i]=id.split('|'); const R=(S.repertoire||{})
 function repRow(r,id){
   const tot=r.n||1;
   return `<div class="oprow" data-rep="${id}" role="button"><div class="om"><div class="ok"><span class="mono">${esc(r.key)}</span>${r.other?' <span class="sub">그 외</span>':''}</div>
-    <div class="nm">주로 ${esc(r.name)} · ${r.n}판 ${r.win}승 ${r.draw}무 ${r.loss}패</div>
+    <div class="nm">주로 ${esc(r.name)} · ${r.n}판 ${r.win}승 ${r.draw}무 ${r.loss}패${r.book?' · 연습 가능':''}</div>
     <div class="wdl"><i style="width:${r.win/tot*100}%;background:var(--win)"></i><i style="width:${r.draw/tot*100}%;background:var(--draw)"></i><i style="width:${r.loss/tot*100}%;background:var(--loss)"></i></div></div>
     <div class="os"><b>${r.score}%</b>${verdChip(r)}</div></div>`;
 }
@@ -320,7 +320,7 @@ function repSummary(S){
 }
 function repSection(S){
   const R=S.repertoire; if(!R) return '';
-  let h=`<section id="s-rep" data-view="stats"><h2>오프닝 성적<small>내가 고른 수순과 상대가 고른 수순별 승률 · 같은 색의 내 평균과 비교 · 누르면 그 오프닝의 코칭</small></h2>`+repSummary(S);
+  let h=`<section id="s-rep" data-view="stats"><h2>오프닝 성적<small>내가 고른 수순과 상대가 고른 수순별 승률 · 같은 색의 내 평균과 비교 · 누르면 그 오프닝의 코칭과 연습</small></h2>`+repSummary(S)+`<div class="more" style="padding:0 0 12px"><a class="btn" href="train.html">오프닝 연습 목록</a></div>`;
   for(const [c,name] of [['w','백'],['b','흑']]){
     const B=R[c]&&R[c].base; if(!B) continue;
     h+=`<div class="card repcard"><h3 style="margin-top:0">${name}으로 <span class="sub">${B.n}판 · 평균 승률 ${B.score}%</span></h3>`;
@@ -343,6 +343,7 @@ function repView(r,c,side){
   h+=`<div class="verdict ${cls}"><span class="ic">${v[0]}</span>${r.n}판 승률 <b>${r.score}%</b> (${r.win}승 ${r.draw}무 ${r.loss}패). 내 ${color} 평균 ${B.score}%보다 ${Math.abs(r.diff)}%p ${r.diff<0?'낮습니다':'높습니다'}.
     <div class="p">${r.ev.p!=null?`나머지 ${color} 판과 비교한 p=${r.ev.p<0.001?'<0.001':r.ev.p.toFixed(2)}`:''}${r.verdict.endsWith('hint')?' · 판 수가 적어 아직 우연일 수 있습니다':''}</div></div>`;
   const dE=r.eval15!=null&&B.eval15!=null?r.eval15-B.eval15:null, dC=r.clock15!=null&&B.clock15!=null?r.clock15-B.clock15:null, dM=+(m.per_game-B.mist_pg).toFixed(2);
+  if(r.book) h+=`<a class="card pz trainlink" href="train.html?o=${encodeURIComponent(r.id)}"><div><b>이 오프닝 직접 두어 보기</b><div class="sub">메인라인과 상대가 자주 두는 갈래 ${r.book}개 라인 · 15수까지</div></div><span class="btn on">연습 ›</span></a>`;
   h+=`<div class="tiles3"><div class="tile"><div class="k">15수 시점 형세</div><div class="v">${cpTxt(r.eval15)}</div><div class="d">내 ${color} 평균 ${cpTxt(B.eval15)}</div></div>
     <div class="tile"><div class="k">15수 안 실수</div><div class="v">${m.per_game}<small>/판</small></div><div class="d">평균 ${B.mist_pg}</div></div>
     <div class="tile"><div class="k">15수 시점 시계</div><div class="v">${clk(r.clock15)}</div><div class="d">평균 ${clk(B.clock15)}</div></div></div>`;
