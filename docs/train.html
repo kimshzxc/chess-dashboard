@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark light">
 <meta name="theme-color" content="#0e1014">
-<title>오프닝 연습</title>
+<title>연습 · 오프닝</title>
 <script>try{var m=localStorage.getItem('chess-mode');if(m)document.documentElement.dataset.mode=m}catch(e){}</script>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" href="icon-192.png">
@@ -19,13 +19,14 @@
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="train.css">
 </head>
-<body data-tab="stats">
+<body data-tab="puzzle">
 <header>
-  <div class="top"><a href="index.html#stats" class="btn" id="backbtn">오프닝 성적</a><span class="btn" id="tbtn"></span></div>
+  <div class="ptop"><h1>연습</h1><span class="btn" id="tbtn"></span></div>
   <div id="tpanel-slot"></div>
+  <div id="pnav"></div>
 </header>
 <main id="main"><div class="sk" style="height:70px;margin-top:12px"></div><div class="sk" style="height:360px;max-width:440px;margin:14px auto 0"></div></main>
-<footer>라인은 정석 책이 아니라 내 게임과 스톡피시로 만듭니다. 상대의 수는 내 게임에서 가장 자주 나온 수이고, 게임에 없는 국면부터는 엔진의 최선 수입니다. 내 수는 평소 두던 수가 충분히 좋으면 그대로, 아니면 엔진의 최선 수입니다.</footer>
+<footer>라인은 정석 책이 아니라 내 게임과 스톡피시로 만듭니다. 상대의 수는 내 게임에서 가장 자주 나온 수, 게임에 없는 국면부터는 엔진의 수입니다.</footer>
 <script src="shared.js"></script>
 <script type="module" src="train.js"></script>
 </body>

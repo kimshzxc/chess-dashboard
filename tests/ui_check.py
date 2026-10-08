@@ -313,21 +313,11 @@ def run(c, base, server, shots):
                       and c.ev(f"document.querySelectorAll('#cat-{k2} .diag li').length") >= 1 and c.ev(f"!!document.querySelector('#cat-{k2} .rule')"))
                 c.tap(f'#cat-{k2} [data-cattrend]'); ok = c.wait("document.querySelector('#sheet').classList.contains('open') && !!document.querySelector('#sheet .verdict')", 3)
                 check("유형의 추이 분석 시트", ok, c.ev("document.querySelector('#sheet-title').textContent")); c.tap("#sheet-x", None); c.pump(0.4)
-            c.ev("window.scrollTo(0,0)"); c.tap('#subtabs button[data-sub="open"]', None); c.pump(0.5)
-            check("오프닝별 보기로 전환", c.ev("!document.querySelector('#s-open').hidden && document.querySelector('#s-cats').hidden") and set(c.ev(VIS)) == {"mistakes"})
-            o = c.ev(OVER); check("가로 넘침 없음 (오프닝별)", o[0] <= o[1], o)
-            ops = S["openings"].get("w") or []
-            if ops:
-                check("오프닝 프로필: 15수 안 실수와 수별 막대", str(ops[0]["mist"]["per_game"]) in (c.ev("document.querySelector('#op-w .tiles3')?.innerText") or "")
-                      and c.ev("document.querySelectorAll('#op-w .mhist rect').length") == sum(1 for v in ops[0]["mist"]["by_move"] if v), c.ev("document.querySelector('#op-w .tiles3')?.innerText.replace(/\\n/g,' ').slice(0,60)"))
-                snap("openings")
-            if c.ev("!!document.querySelector('.opitem[data-op=\"w\"][data-i=\"1\"]')"):
-                c.tap('.opitem[data-op="w"][data-i="1"]')
-                check("오프닝 선택 전환", c.ev("document.querySelector('.opitem[data-op=\"w\"][data-i=\"1\"]').classList.contains('on')")
-                      and str(ops[1]["mist"]["per_game"]) in (c.ev("document.querySelector('#op-w .tiles3')?.innerText") or ""))
-            c.ev("window.scrollTo(0,0)"); c.tap('#subtabs button[data-sub="worst"]', None); c.pump(0.5)
-            check("큰 실수 보기로 전환", c.ev("!document.querySelector('#s-worst').hidden && document.querySelector('#s-open').hidden"))
-            c.tap('#subtabs button[data-sub="cats"]', None); c.pump(0.4)
+            c.ev("window.scrollTo(0,0)"); c.tap('.subtabs[data-for="mistakes"] button[data-sub="worst"]', None); c.pump(0.5)
+            check("큰 실수 보기로 전환", c.ev("!document.querySelector('#s-worst').hidden && document.querySelector('#s-cats').hidden") and set(c.ev(VIS)) == {"mistakes"})
+            o = c.ev(OVER); check("가로 넘침 없음 (큰 실수)", o[0] <= o[1], o)
+            c.tap("#s-worst [data-expand]"); check("큰 실수: 장면을 펼치면 보드가 그려진다", c.wait("!!document.querySelector('#s-worst .viewer svg.board')", 3))
+            c.ev("window.scrollTo(0,0)"); c.tap('.subtabs[data-for="mistakes"] button[data-sub="cats"]', None); c.pump(0.4)
         if tab == "stats":
             R = S.get("repertoire") or {}
             nrows = sum(len(R[cc][sd]) for cc in "wb" for sd in ("mine", "opp") if R.get(cc) and R[cc].get("base"))
@@ -344,10 +334,20 @@ def run(c, base, server, shots):
                     c.tap("#sheet [data-expand]"); check("코칭 시트의 반복 실수: 보드가 그려진다", c.wait("!!document.querySelector('#sheet .viewer svg.board')", 3))
                 snap("rep_sheet")
                 c.tap("#sheet-x", None); c.pump(0.4)
-            check("취약·강점 오프닝 요약이 통계 탭에 있다", not nrows or c.ev("!document.querySelector('#s-coach .oprow') && !document.querySelector('#s-open .oprow[data-rep]')"))
+            if nrows:
+                c.ev("window.scrollTo(0,0)"); c.tap('#repc button[data-c="b"]'); c.pump(0.3)
+                check("오프닝 성적: 백/흑 전환", c.ev("document.querySelector('[data-repc=\"w\"]').hidden && !document.querySelector('[data-repc=\"b\"]').hidden"))
+                c.tap('#repc button[data-c="w"]'); c.pump(0.3)
+            for sub in ("time", "session", "phase"):
+                c.ev("window.scrollTo(0,0)"); c.tap(f'.subtabs[data-for="stats"] button[data-sub="{sub}"]', None); c.pump(0.4)
+                v = c.ev("[...document.querySelectorAll('#main>section:not([hidden])')].map(s=>s.dataset.sub||'nav')")
+                check(f"통계 하위 보기 ({sub}): 그 구획만 보인다", v and set(v) == {"nav", sub}, v)
+                o = c.ev(OVER); check(f"가로 넘침 없음 (통계 {sub})", o[0] <= o[1], o)
+            c.ev("window.scrollTo(0,0)"); c.tap('.subtabs[data-for="stats"] button[data-sub="time"]', None); c.pump(0.4)
             cut = c.ev("[...document.querySelectorAll('#main>section:not([hidden]) .bar span')].filter(s=>s.getBoundingClientRect().width>0 && s.getBoundingClientRect().right > s.closest('.card').getBoundingClientRect().right-4).length")
             check("막대 옆 글씨가 카드 안에 들어온다", cut == 0, cut)
             snap("stats")
+            c.ev("window.scrollTo(0,0)"); c.tap('.subtabs[data-for="stats"] button[data-sub="open"]', None); c.pump(0.4)
     c.ev("history.back()"); c.pump(0.8)
     check("뒤로 가기로 이전 탭", c.ev("document.querySelector('#tabbar a.on')?.dataset.tab") == "mistakes")
     c.tap('#tabbar a[data-tab="home"]', None); c.pump(0.8)

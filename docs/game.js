@@ -1,7 +1,7 @@
 /* 게임 상세 페이지. shared.js 다음에 module 로 로드된다. */
 document.body.insertAdjacentHTML('afterbegin', await fetch('pieces.svg').then(r=>r.text()));
 $('#tpanel-slot').innerHTML=themePanel(); applyMode();
-$('#backbtn').innerHTML=icon('back')+'게임 목록';
+$('#backbtn').innerHTML=icon('back')+'게임';
 const params=new URLSearchParams(location.search);
 const ID=params.get('id'); let G=null, IDX=0, FLIP=false, SHOW_BEST=true;
 let COACH=null;   // coach.json: 전체 기간의 집중 과제와 유형별 최근 빈도 (없어도 페이지는 동작한다)
@@ -35,7 +35,7 @@ function lessonsHTML(){
   for(const k of keys){ const m=catOf(k), c=COACH&&COACH.cats&&COACH.cats[k];
     h+=`<div class="lesson"><div class="lh"><b>${esc(m.n)}</b>${focus.includes(k)?'<span class="chip me">집중 과제</span>':''}<span class="lc">−${cost(k).toFixed(0)}%p</span></div>
       <div class="lm">${by[k].map(({p,i})=>`<span class="lmv" data-jump="${i+1}">${mv(p)}</span>`).join('')}</div>
-      <div class="sub">${c?`최근 ${COACH.k}판 중 ${c.recent}판에서 나온 유형 · `:''}두기 전에: ${esc(m.rule)} <a href="index.html?cat=${k}#mistakes">다른 사례 ›</a></div></div>`; }
+      <div class="sub">${c?`최근 ${COACH.k}판 중 ${c.recent}판에서 나온 유형 · `:''}<a href="index.html?cat=${k}#mistakes">규칙과 다른 사례 ›</a></div></div>`; }
   return h+'</div>';
 }
 function renderMain(){

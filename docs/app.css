@@ -1,7 +1,4 @@
 /* ---------- 대시보드 ---------- */
-.tabs{display:flex;gap:2px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:4px}
-.tabs button{flex:1;min-height:38px;padding:0;border:0;background:transparent;color:var(--text2);border-radius:10px;font-size:14.5px;font-weight:600;-webkit-tap-highlight-color:transparent;transition:background .15s,color .15s}
-.tabs button.on{background:var(--surface2);color:var(--text);box-shadow:var(--shadow-sm);outline:1px solid var(--line2)}
 /* 히어로 */
 .hero{margin-top:16px}
 .herocard{background:linear-gradient(160deg,color-mix(in srgb,var(--me) 22%,var(--surface)) 0%,var(--surface) 55%);border:1px solid var(--line2);border-radius:22px;padding:18px 16px 10px;box-shadow:var(--shadow)}
@@ -172,3 +169,17 @@ td.n,th.n{text-align:right;white-space:nowrap}
 .pzs{margin-top:0}.pzs .pz{margin-top:0}
 .repcard>.k:first-child{margin-top:0}
 .trainlink{margin:0 0 12px}
+/* ---------- 정리: 게임 카드, 하위 탭, 오프닝 성적 머리 ---------- */
+.grow{display:flex;gap:12px;align-items:flex-start;color:inherit}
+.game .elo{font-weight:500;color:var(--muted);font-size:13.5px}
+.game .spark{margin-top:10px;height:44px}
+.game .w{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap;cursor:pointer;-webkit-tap-highlight-color:transparent;margin-top:10px}
+.game .w .tg{margin-left:auto;font-size:13px;font-weight:600;color:var(--me-ink);white-space:nowrap}
+.game .links{margin-top:8px}
+.subnav{margin-top:14px}
+.subnav+section{margin-top:18px}
+.rephead{display:flex;gap:10px;align-items:center;margin:4px 0 12px}
+.rephead .tabs{flex:1}
+.rephead .btn{flex:none;min-height:48px}
+.oprow .os{min-width:64px}
+h2 small{max-width:46ch}

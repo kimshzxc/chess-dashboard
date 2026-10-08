@@ -7,7 +7,7 @@
    puzzle-history  날짜별 기록 {date:{ok,n}}  연속 일수와 최근 7일 막대. */
 document.body.insertAdjacentHTML('afterbegin', await fetch('pieces.svg').then(r=>r.text()));
 const ALL = await fetch('puzzles.json',{cache:'no-cache'}).then(r=>r.json()).catch(()=>[]);
-$('#tpanel-slot').innerHTML=themePanel(); applyMode();
+$('#tpanel-slot').innerHTML=themePanel(); applyMode(); $('#pnav').innerHTML=practiceNav('puzzle');
 
 const DAY=864e5, DAILY=10, STEPS=[1,3,7], MAX_REVIEW=80, MAX_SEEN=600;
 const dkey=(off=0)=>new Date(Date.now()+9*3600*1000+off*DAY).toISOString().slice(0,10);   // KST 날짜, off 일 뒤
@@ -75,7 +75,7 @@ function headHTML(){
   let h=`<div class="card streakcard"><div><div class="sub">연속 풀이</div><div class="n">${n}<small>일</small></div><div class="sub">누적 정답 ${tot[0]} / ${tot[1]}${tot[1]?` (${Math.round(tot[0]/tot[1]*100)}%)`:''}${waiting?` · 복습 대기 ${waiting}개`:''}</div></div><div class="week">${week}</div></div>`;
   const focus=(COACH&&COACH.focus)||[];
   const keys=Object.keys(NCAT).filter(k=>CATS[k]).sort((a,b)=>(focus.includes(b)-focus.includes(a))||NCAT[b]-NCAT[a]);
-  if(keys.length) h+=`<div class="pzmodes"><a class="${PRACTICE?'':'on'}" href="puzzle.html">오늘의 퍼즐</a>${keys.map(k=>`<a class="${k===CAT?'on':''}" href="puzzle.html?cat=${k}">${esc(catOf(k).n)} ${NCAT[k]}</a>`).join('')}</div>`;
+  if(keys.length) h+=`<div class="pzmodes"><a class="${PRACTICE?'':'on'}" href="puzzle.html">오늘의 10문제</a>${keys.map(k=>`<a class="${k===CAT?'on':''}" href="puzzle.html?cat=${k}">${esc(catOf(k).n)} ${NCAT[k]}</a>`).join('')}</div>`;
   const inDaily=TD.idx<TD.daily, vals=Object.values(TD.res);
   if(PRACTICE) return h+`<div class="rule" style="margin-top:12px"><span>두기 전에</span>${esc(catOf(CAT).rule)}</div><div class="prog"><div><b>${esc(catOf(CAT).n)}</b> <span class="sub">유형 연습 ${Math.min(TD.idx+1,TD.daily)} / ${TD.daily} · 정답 ${vals.filter(x=>x==='ok').length} / ${vals.length}</span></div></div>`;
   h+=`<div class="prog"><div><b>${inDaily?'오늘의 퍼즐':'추가 퍼즐'}</b> <span class="sub">${inDaily?`${TD.idx+1} / ${TD.daily}`:`오늘 정답 ${vals.filter(x=>x==='ok').length} / ${vals.length}`}</span></div>`;

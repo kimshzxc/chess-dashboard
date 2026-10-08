@@ -76,11 +76,13 @@ const icon=(n)=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stro
 /* 하단 탭바 (세 페이지 공용). body[data-tab] 이 현재 탭 */
 function tabbar(){
   const cur=document.body.dataset.tab||'';
-  const items=[['home','홈','index.html#home'],['games','게임','index.html#games'],['mistakes','복기','index.html#mistakes'],['puzzle','퍼즐','puzzle.html'],['stats','통계','index.html#stats']];
+  const items=[['home','홈','index.html#home'],['games','게임','index.html#games'],['mistakes','복기','index.html#mistakes'],['puzzle','연습','puzzle.html'],['stats','통계','index.html#stats']];
   return `<nav class="tabbar" id="tabbar">`+items.map(([k,n,u])=>`<a href="${u}" data-tab="${k}" class="${k===cur?'on':''}">${icon(k)}${n}</a>`).join('')+`</nav>`;
 }
 document.body.insertAdjacentHTML('beforeend',tabbar());
-{ const tb=document.getElementById('tbtn'); if(tb) tb.innerHTML=icon('sliders')+'테마'; }
+{ const tb=document.getElementById('tbtn'); if(tb){ tb.innerHTML=icon('sliders'); tb.setAttribute('aria-label','테마'); tb.setAttribute('role','button'); tb.title='테마'; } }
+/* 연습 탭 머리: 퍼즐 / 오프닝 연습 전환 (puzzle.html, train.html 공용) */
+const practiceNav=(cur)=>`<div class="tabs seg"><a class="${cur==='puzzle'?'on':''}" href="puzzle.html">퍼즐</a><a class="${cur==='train'?'on':''}" href="train.html">오프닝 연습</a></div>`;
 function themePanel(){
   let h=`<div class="tpanel" id="tpanel"><div class="lab">화면</div><div class="row"><span class="sw mode" data-mode="dark">짙게</span><span class="sw mode" data-mode="light">밝게</span></div><div class="lab">판 색상</div><div class="row">`;
   for(const [k,b] of Object.entries(BOARDS)) h+=`<span class="sw" data-board="${k}"><i><b style="background:${b.l}"></b><b style="background:${b.d}"></b><b style="background:${b.d}"></b><b style="background:${b.l}"></b></i>${b.name}</span>`;

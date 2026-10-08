@@ -14,38 +14,16 @@ const plyOf=(w)=> (w.move-1)*2+(w.mover==='w'?1:2);
 function blunderCard(w){
   const head=`<div class="h"><b><span class="mono">${mv(w)}</span> 대신 <span class="mono">${esc(w.best)}</span></b><span class="s">${w.date}</span></div>
       <div class="s">${catTag(w.cat)} ${ev(w.cp_before)} → ${ev(w.cp_after)} (−${w.wp_loss}%p) · ${w.color==='w'?'백':'흑'} vs ${esc(w.opp)} · ${PH[w.phase]} · 남은시간 ${clk(w.clock)}${w.spent!=null?` · 이 수에 ${Math.round(w.spent)}초`:''}</div>
-      <div class="links"><a href="${gameLink(w.url,plyOf(w))}">게임 전체 보기 →</a><a href="${esc(w.url)}" target="_blank" rel="noopener">체스닷컴 ↗</a></div>`;
+      <div class="links"><a href="${gameLink(w.url,plyOf(w))}">이 판에서 보기 ›</a></div>`;
   return `<div class="game"><div class="m">${head}${w.fen?blunderViewer(w):''}</div></div>`;
 }
 function blunderRow(w, wid, extra){
   return `<div class="game"><div class="m"><div class="h"><b><span class="mono">${mv(w)}</span> 대신 <span class="mono">${esc(w.best)}</span></b><span class="s">${extra||w.date}</span></div>
       <div class="s">${catTag(w.cat)} ${ev(w.cp_before)} → ${ev(w.cp_after)}${w.wp_loss?` (−${w.wp_loss}%p)`:''} · vs ${esc(w.opp)} · ${PH[w.phase]||''} · 남은시간 ${clk(w.clock)}</div>
-      <div class="links"><span class="btn" data-expand="${wid}">장면 보기</span><a href="${gameLink(w.url,plyOf(w))}">게임 전체 보기 →</a><a href="${esc(w.url)}" target="_blank" rel="noopener">체스닷컴 ↗</a></div>
+      <div class="links"><span class="btn" data-expand="${wid}">장면 보기</span><a href="${gameLink(w.url,plyOf(w))}">이 판에서 보기 ›</a></div>
       <div id="${wid}" hidden data-w='${esc(JSON.stringify(w))}'></div></div></div>`;
 }
 
-/* 오프닝 경로 뷰어 */
-function openingViewer(op, color){
-  const path=op.path||[]; if(path.length<2) return '<div class="empty">데이터 부족</div>';
-  const flip=color==='b'; const states=[];
-  for(let k=0;k<path.length;k++){
-    const cur=path[k], nx=path[k+1];
-    const st={fen:cur.fen, san:cur.san, arrows:[], last:cur.uci?[cur.uci.slice(0,2),cur.uci.slice(2,4)]:[], bad:!!cur.problem,
-              num: cur.san? (cur.mover==='w'?`${cur.move}.`:(k===1?`${cur.move}...`:'')) : ''};
-    let cap='';
-    if(k>0){
-      cap = cur.mine? `나 ${esc(cur.san)} · ${cur.n}판 승률 ${cur.score}%` : `상대 ${esc(cur.san)} · ${cur.n}판`;
-      if(cur.mine && cur.avg_loss!=null) cap+=` · 평균 손실 ${cur.avg_loss}`;
-      if(cur.problem) cap+=` · <b style="color:${RED}">정답 ${esc(cur.best)}</b>`;
-      if(cur.alts&&cur.alts.length) cap+=`<div class="altbox">다른 선택: ${cur.alts.map(a=>`${esc(a.san)}(${a.n})`).join(', ')}</div>`;
-    } else cap = `${op.moves} 이후 · ${op.n}판 승률 ${op.score}% · › 로 진행`;
-    if(nx){ st.arrows.push([nx.uci, nx.problem?RED:(nx.mine?BLUE:GRAY)]); if(nx.problem&&nx.best_uci) st.arrows.push([nx.best_uci,GREEN]);
-      if(nx.problem) cap+=`<div style="color:${RED}">다음 수 ${esc(nx.san)} 이 자주 문제 → 정답 ${esc(nx.best)}</div>`; }
-    st.caption=cap; states.push(st);
-  }
-  return viewer({flip,lines:[{label:'진행',states}]});
-}
-let OPEN_SEL={w:0,b:0};
 /* 몇 수째에 실수가 몰리는지: 1~15수 막대 */
 function moveHist(by){
   const mx=Math.max(...by,1), W=360, H=92, L=4, B=18, T=14, bw=(W-L*2)/by.length, ph=H-T-B;
@@ -57,58 +35,11 @@ function moveHist(by){
   return h+`<line x1="${L}" x2="${W-L}" y1="${T+ph+.5}" y2="${T+ph+.5}" stroke="var(--line2)"/></svg>`;
 }
 const catBars=(cats,n)=>{ const top=cats.slice(0,n); return bars(top.map(c=>({label:catOf(c.key).n,me:c.n,fmt:v=>v+'회'})),Math.max(...top.map(c=>c.n),1)); };
-function openingProfile(op, color){
-  const m=op.mist; if(!m) return '';
-  const base=((coachOf(DATA.windows[W]).early||{}).per_game_by_color||{})[color];
-  let h=`<div class="tiles3">
-    <div class="tile"><div class="k">15수 안 실수</div><div class="v">${m.per_game}<small>/판</small></div><div class="d">내 ${color==='w'?'백':'흑'} 평균 ${base??'-'}</div></div>
-    <div class="tile"><div class="k">처음 틀어지는 수</div><div class="v">${m.first_slip!=null?m.first_slip+'<small>수</small>':'-'}</div><div class="d">실수 없이 15수를 지난 판 ${m.clean}</div></div>
-    <div class="tile"><div class="k">승률</div><div class="v">${op.score}<small>%</small></div><div class="d">${op.win}승 ${op.draw}무 ${op.loss}패</div></div>
-  </div>`;
-  if(m.n){
-    h+=`<h3>몇 수째에 틀리나 <span class="sub">(15수 안 실수 ${m.n}개)</span></h3>${moveHist(m.by_move)}`;
-    h+=`<h3>이 오프닝에서 많이 나오는 유형</h3>${catBars(m.cats,4)}`;
-  }
-  return h;
-}
-function openingBody(op, color){
-  let h=openingProfile(op,color);
-  const tr=op.trouble||[];
-  h+=`<h3>같은 자리에서 반복한 실수 <span class="sub">(같은 국면, 같은 수를 2번 이상)</span></h3>`;
-  if(tr.length) tr.forEach((w,i)=>{ h+=blunderRow(w,`tr${color}${OPEN_SEL[color]}_${i}`,`${w.n}번 · 평균 손실 ${w.avg_loss}`); });
-  else h+=`<div class="sub">아직 없습니다. 이 오프닝에서는 매번 다른 자리에서 틀립니다.</div>`;
-  h+=`<h3>자주 두는 수순</h3><div class="legend"><span><i style="background:${BLUE}"></i>내 다음 수</span><span><i style="background:${GRAY}"></i>상대 다음 수</span><span><i style="background:${RED}"></i>자주 틀리는 수</span><span><i style="background:${GREEN}"></i>엔진 정답</span></div>`+openingViewer(op,color);
-  return h;
-}
-function openingSection(S){
-  const ea=coachOf(S).early;
-  let h=`<section id="s-open" data-view="mistakes" data-sub="open"><h2>수순 탐색기<small>양쪽의 첫 두 수씩이 같은 판끼리 · 15수 안에서 승률을 10%p 이상 잃은 수와 자주 두는 진행</small></h2>`;
-  if(ea&&ea.n){
-    const all=[...(S.openings.w||[]).map(r=>[r,'백']),...(S.openings.b||[]).map(r=>[r,'흑'])].filter(x=>x[0].mist&&x[0].n>=5).sort((a,b)=>b[0].mist.per_game-a[0].mist.per_game);
-    h+=`<div class="card"><div class="sub" style="margin-bottom:8px">오프닝 단계 전체: 판당 <b>${ea.per_game}개</b>, 가장 흔한 유형</div>${catBars(ea.cats,5)}`;
-    if(all.length>1) h+=`<div class="sub" style="margin-top:10px">실수가 가장 잦은 오프닝은 <b>${all[0][1]} <span class="mono">${esc(all[0][0].moves)}</span></b> (판당 ${all[0][0].mist.per_game}개), 가장 깨끗한 오프닝은 <b>${all[all.length-1][1]} <span class="mono">${esc(all[all.length-1][0].moves)}</span></b> (판당 ${all[all.length-1][0].mist.per_game}개)입니다.</div>`;
-    h+=`</div>`;
-  }
-  for(const [col,name] of [['w','백'],['b','흑']]){
-    const rows=S.openings[col]||[];
-    h+=`<div class="card"><h3 style="margin-top:0">${name}으로</h3>`;
-    if(!rows.length){h+='<div class="empty">데이터 부족</div></div>';continue;}
-    h+=`<div class="oplist">`+rows.map((r,i)=>`<div class="opitem ${i===OPEN_SEL[col]?'on':''}" data-op="${col}" data-i="${i}"><div><span class="mono">${esc(r.moves)}</span><div class="nm">${esc(r.name)} · ${r.n}판${r.mist?` · 15수 안 실수 판당 ${r.mist.per_game}${r.mist.cats.length?` · 주로 ${esc(catOf(r.mist.cats[0].key).n)}`:''}`:''}</div></div><div class="sc" style="color:${r.score<45?'var(--loss)':r.score>=60?'var(--win)':'inherit'}">${r.score}%</div></div>`).join('')+`</div>`;
-    h+=`<div id="op-${col}">${openingBody(rows[OPEN_SEL[col]],col)}</div></div>`;
-  }
-  return h+'</section>';
-}
-document.addEventListener('click',(e)=>{
-  const t=e.target.closest('[data-op]'); if(!t) return;
-  const col=t.dataset.op, i=+t.dataset.i; OPEN_SEL[col]=i;
-  const S=DATA.windows[W]; document.querySelectorAll(`[data-op="${col}"]`).forEach(x=>x.classList.toggle('on',+x.dataset.i===i));
-  const box=document.getElementById('op-'+col); box.innerHTML=openingBody(S.openings[col][i],col); drawAll(box); applyTheme();
-});
 document.addEventListener('click',(e)=>{
   const t=e.target.closest('[data-expand]'); if(!t) return;
   const box=document.getElementById(t.dataset.expand); const w=JSON.parse(box.dataset.w||'null');
   if(!box.innerHTML && w){ box.innerHTML=blunderViewer(w); drawAll(box); applyTheme(); }
-  box.hidden=!box.hidden; t.textContent=box.hidden?'장면 보기':'접기';
+  box.hidden=!box.hidden; (t.querySelector('.tg')||t).textContent=box.hidden?'장면 보기':'접기';
 });
 
 /* ---------- 보완점 추이 분석 시트 ---------- */
@@ -240,7 +171,7 @@ function lastGameCard(S){
 function coachSection(S){
   const co=coachOf(S); if(!co.cats.length) return '';
   const focus=co.focus.map(k=>catData(S,k)).filter(Boolean);
-  return `<section id="s-coach" data-view="home"><h2>집중 과제<small>잃은 승률이 가장 큰 실수 유형 ${focus.length}가지와 두기 전 확인할 질문 · 누르면 사례</small></h2>
+  return `<section id="s-coach" data-view="home"><h2>집중 과제<small>가장 비싼 실수 ${focus.length}가지와 두기 전 확인할 질문</small></h2>
     <div class="card flist">${focus.map(focusRow).join('')}</div>${lastGameCard(S)}</section>`;
 }
 /* 유형 하나의 상황 진단: 시간이 없어서인지, 서둘러서인지, 이기고 있어서인지 */
@@ -266,7 +197,7 @@ function catBody(c){
 }
 function catsSection(S){
   const co=coachOf(S);
-  let h=`<section id="s-cats" data-view="mistakes" data-sub="cats"><h2>실수 유형<small>승률을 10%p 이상 잃은 내 수 ${co.n}개 · 막대는 그 유형으로 잃은 승률의 비중 · 누르면 진단과 사례</small></h2>`;
+  let h=`<section id="s-cats" data-view="mistakes" data-sub="cats"><h2>실수 유형<small>승률을 10%p 이상 잃은 수 ${co.n}개 · 막대는 잃은 승률 중 비중</small></h2>`;
   if(!co.cats.length) return h+'<div class="empty">이 기간에는 해당하는 실수가 없습니다.</div></section>';
   if(!catData(S,OPEN_CAT)) OPEN_CAT=co.cats[0].key;
   const mx=Math.max(...co.cats.map(c=>c.share),1);
@@ -286,23 +217,23 @@ function showCat(key, scroll){
     b.innerHTML=open?catBody(catData(S,k)):''; if(open){ drawAll(b); applyTheme(); } });
   if(scroll){ const el=document.getElementById('cat-'+key); if(el) el.scrollIntoView({block:'start'}); }
 }
-function setSub(v){ SUB=v; try{sessionStorage.setItem('chess-sub',v)}catch(e){}; applyView(); }
+function setSub(view,v){ SUB[view]=v; try{sessionStorage.setItem('chess-subs',JSON.stringify(SUB))}catch(e){}; applyView(); }
 document.addEventListener('click',(e)=>{
-  const sb=e.target.closest('#subtabs button'); if(sb){ setSub(sb.dataset.sub); return; }
+  const sb=e.target.closest('.subtabs button'); if(sb){ setSub(sb.parentElement.dataset.for,sb.dataset.sub); return; }
   const oc=e.target.closest('[data-opencat]');
-  if(oc){ e.preventDefault(); setSub('cats'); if(VIEW!=='mistakes'){ VIEW='mistakes'; history.pushState(null,'','#mistakes'); applyView(); } showCat(oc.dataset.opencat,true); return; }
+  if(oc){ e.preventDefault(); setSub('mistakes','cats'); if(VIEW!=='mistakes'){ VIEW='mistakes'; history.pushState(null,'','#mistakes'); applyView(); } showCat(oc.dataset.opencat,true); return; }
   const ch=e.target.closest('.cath'); if(ch){ const k=ch.dataset.cat; if(k===OPEN_CAT){ OPEN_CAT='-'; const el=ch.parentElement; el.classList.remove('open'); ch.setAttribute('aria-expanded','false'); el.querySelector('.catb').innerHTML=''; } else showCat(k,true); }
 });
 
 /* ---------- 오프닝 성적표: 내가 고른 수순 / 상대가 고른 수순 (stats.json 의 repertoire) ---------- */
 const VERD={weak:['취약','critical'],weak_hint:['취약 조짐','serious'],strong:['강점','good'],strong_hint:['강점 조짐','good'],even:['평균 수준','']};
-const verdChip=(r)=>{ const v=VERD[r.verdict]||VERD.even; return `<span class="chip ${v[1]}">${v[0]}</span>`; };
+const verdChip=(r)=>{ const v=VERD[r.verdict]; return v&&r.verdict!=='even'?`<span class="chip ${v[1]}">${v[0]}</span>`:''; };
 const SIDE={mine:'내가 고른 수순',opp:'상대가 고른 수순'};
 const repOf=(S,id)=>{ const [c,side,i]=id.split('|'); const R=(S.repertoire||{})[c]; return R&&R[side]&&R[side][+i]; };
 function repRow(r,id){
   const tot=r.n||1;
   return `<div class="oprow" data-rep="${id}" role="button"><div class="om"><div class="ok"><span class="mono">${esc(r.key)}</span>${r.other?' <span class="sub">그 외</span>':''}</div>
-    <div class="nm">주로 ${esc(r.name)} · ${r.n}판 ${r.win}승 ${r.draw}무 ${r.loss}패${r.book?' · 연습 가능':''}</div>
+    <div class="nm">${esc(r.name)} · ${r.n}판 ${r.win}승 ${r.draw}무 ${r.loss}패</div>
     <div class="wdl"><i style="width:${r.win/tot*100}%;background:var(--win)"></i><i style="width:${r.draw/tot*100}%;background:var(--draw)"></i><i style="width:${r.loss/tot*100}%;background:var(--loss)"></i></div></div>
     <div class="os"><b>${r.score}%</b>${verdChip(r)}</div></div>`;
 }
@@ -315,19 +246,21 @@ function repRanked(S){
 }
 function repSummary(S){
   const k=repRanked(S); if(!k.weak.length&&!k.strong.length) return '';
-  const col=(title,arr)=>arr.length?`<div class="k">${title}</div>`+arr.slice(0,3).map(x=>repRow(x.r,x.id).replace('<div class="nm">',`<div class="nm">${x.c==='w'?'백':'흑'} · ${SIDE[x.side]} · `)).join(''):'';
+  const col=(title,arr)=>arr.length?`<div class="k">${title}</div>`+arr.slice(0,3).map(x=>repRow(x.r,x.id).replace('<div class="nm">',`<div class="nm">${x.c==='w'?'백':'흑'} · `)).join(''):'';
   return `<div class="card repcard" id="rep-sum">${col('취약한 오프닝',k.weak)}${col('강한 오프닝',k.strong)}</div>`;
 }
+let REPC='w';
 function repSection(S){
   const R=S.repertoire; if(!R) return '';
-  let h=`<section id="s-rep" data-view="stats"><h2>오프닝 성적<small>내가 고른 수순과 상대가 고른 수순별 승률 · 같은 색의 내 평균과 비교 · 누르면 그 오프닝의 코칭과 연습</small></h2>`+repSummary(S)+`<div class="more" style="padding:0 0 12px"><a class="btn" href="train.html">오프닝 연습 목록</a></div>`;
-  for(const [c,name] of [['w','백'],['b','흑']]){
+  let h=`<section id="s-rep" data-view="stats" data-sub="open"><h2>오프닝 성적<small>같은 색의 내 평균 승률과 비교 · 누르면 코칭과 연습</small></h2>`+repSummary(S);
+  h+=`<div class="rephead"><div class="tabs" id="repc">${[['w','백'],['b','흑']].map(([c,n])=>`<button data-c="${c}" class="${c===REPC?'on':''}">${n}으로${R[c]&&R[c].base?` ${R[c].base.score}%`:''}</button>`).join('')}</div><a class="btn" href="train.html">연습 목록</a></div>`;
+  for(const c of 'wb'){
     const B=R[c]&&R[c].base; if(!B) continue;
-    h+=`<div class="card repcard"><h3 style="margin-top:0">${name}으로 <span class="sub">${B.n}판 · 평균 승률 ${B.score}%</span></h3>`;
+    h+=`<div class="card repcard" data-repc="${c}" ${c===REPC?'':'hidden'}>`;
     for(const side of ['mine','opp']){
       const rows=R[c][side]||[]; if(!rows.length) continue;
       const N=5, fid=`fold-rep-${c}-${side}`;
-      h+=`<div class="k">${SIDE[side]} <span class="sub">(${c==='w'===(side==='mine')?'백':'흑'}의 첫 수들)</span></div>`;
+      h+=`<div class="k">${SIDE[side]}</div>`;
       rows.forEach((r,i)=>{ if(i===N) h+=`<div class="fold" id="${fid}" hidden>`; h+=repRow(r,`${c}|${side}|${i}`); });
       if(rows.length>N) h+=`</div><div class="more"><span class="btn" data-fold="${fid}" data-unit="개">나머지 ${rows.length-N}개 보기</span></div>`;
     }
@@ -335,6 +268,11 @@ function repSection(S){
   }
   return h+'</section>';
 }
+document.addEventListener('click',(e)=>{
+  const b=e.target.closest('#repc button'); if(!b) return; REPC=b.dataset.c;
+  document.querySelectorAll('#repc button').forEach(x=>x.classList.toggle('on',x.dataset.c===REPC));
+  document.querySelectorAll('[data-repc]').forEach(x=>{ x.hidden=x.dataset.repc!==REPC; });
+});
 const cpTxt=(v)=>v==null?'-':(v>0?'+':v<0?'−':'')+(Math.abs(v)/100).toFixed(1);
 function repView(r,c,side){
   const B=DATA.windows[W].repertoire[c].base, m=r.mist, color=c==='w'?'백':'흑', weak=r.verdict.startsWith('weak'), strong=r.verdict.startsWith('strong');
@@ -405,11 +343,14 @@ const legend = ()=>`<div class="legend"><span><i style="background:var(--s1)"></
 /* 화면(탭): 홈 / 게임 / 복기 / 통계. 주소의 #games 등으로 유지된다 */
 const VIEWS=['home','games','mistakes','stats'];
 let VIEW=VIEWS.includes(location.hash.slice(1))?location.hash.slice(1):'home';
-const SUBS=['cats','open','worst'];
-let SUB='cats'; try{ const v=sessionStorage.getItem('chess-sub'); if(SUBS.includes(v)) SUB=v; }catch(e){}
+/* 탭 안의 하위 보기. 섹션의 data-sub 가 그 탭의 현재 값과 같을 때만 보인다 */
+const SUBS={mistakes:[['cats','유형별'],['worst','큰 실수']], stats:[['open','오프닝'],['time','시간'],['session','컨디션'],['phase','국면']]};
+const SUB={mistakes:'cats',stats:'open'};
+try{ const v=JSON.parse(sessionStorage.getItem('chess-subs')||'{}'); for(const k in SUB) if(SUBS[k].some(x=>x[0]===v[k])) SUB[k]=v[k]; }catch(e){}
+const subnav=(view)=>`<section data-view="${view}" class="subnav"><div class="tabs subtabs" data-for="${view}">${SUBS[view].map(([k,n])=>`<button data-sub="${k}">${n}</button>`).join('')}</div></section>`;
 function applyView(){
-  document.querySelectorAll('#main>section').forEach(s=>{ s.hidden=s.dataset.view!==VIEW||(!!s.dataset.sub&&s.dataset.sub!==SUB); });
-  document.querySelectorAll('#subtabs button').forEach(b=>b.classList.toggle('on',b.dataset.sub===SUB));
+  document.querySelectorAll('#main>section').forEach(s=>{ s.hidden=s.dataset.view!==VIEW||(!!s.dataset.sub&&s.dataset.sub!==SUB[s.dataset.view]); });
+  document.querySelectorAll('.subtabs').forEach(t=>t.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.sub===SUB[t.dataset.for])));
   document.querySelectorAll('#tabbar a').forEach(a=>a.classList.toggle('on',a.dataset.tab===VIEW));
 }
 window.addEventListener('hashchange',()=>{ const v=location.hash.slice(1)||'home'; if(VIEWS.includes(v)&&v!==VIEW){ VIEW=v; applyView(); window.scrollTo(0,0); } });
@@ -417,8 +358,8 @@ function puzzleStreakText(){
   try{ const hst=JSON.parse(localStorage.getItem('puzzle-history')||'{}'); let d=new Date(Date.now()+9*3600*1000), n=0;
     const key=x=>x.toISOString().slice(0,10); if(!hst[key(d)]) d=new Date(d-864e5);
     while(hst[key(d)]){ n++; d=new Date(d-864e5); }
-    if(n>0) return `<span class="streak">${n}일 연속</span> · 내가 실제로 틀린 국면에서 최선 수 찾기`; }catch(e){}
-  return '내가 실제로 틀린 국면에서 최선 수 찾기';
+    if(n>0) return `<span class="streak">${n}일 연속</span> · 퍼즐 10개와 오프닝 연습`; }catch(e){}
+  return '내가 틀린 국면 퍼즐 10개와 오프닝 연습';
 }
 function render(){
   const S = DATA.windows[W];
@@ -445,8 +386,8 @@ function render(){
   </div>
   </section>`;
   h+=coachSection(S);
-  h+=`<section data-view="home" class="pzs"><a class="card pz" href="puzzle.html"><div><b>오늘의 퍼즐 10개</b><div class="sub">${puzzleStreakText()}</div></div><span class="btn on">풀기 ›</span></a></section>`;
-  h+=`<section id="s-weak" data-view="home"><h2>경기 운영<small>시간·틸트 등 통계에서 뽑은 보완점 · 누르면 추이</small></h2>`;
+  h+=`<section data-view="home" class="pzs"><a class="card pz" href="puzzle.html"><div><b>오늘의 연습</b><div class="sub">${puzzleStreakText()}</div></div><span class="btn on">시작 ›</span></a></section>`;
+  h+=`<section id="s-weak" data-view="home"><h2>경기 운영<small>시간·컨디션에서 뽑은 보완점</small></h2>`;
   if(!S.weaknesses.length) h+='<div class="empty">두드러진 약점이 없습니다.</div>';
   const WEAK_N=3;
   for(const w of S.weaknesses){ if(S.weaknesses.indexOf(w)===WEAK_N) h+=`<div class="fold" id="fold-weak" hidden>`; const ic={critical:'중요',serious:'주의',warning:'참고',good:'강점',hint:'표본 부족'}[w.level]||'';
@@ -455,38 +396,36 @@ function render(){
   h+='</section>';
   // 최근 게임
   const RECENT_N=6, FOCUS=coachOf(S).focus;
-  h+=`<section id="s-recent" data-view="games"><h2>최근 게임<small>카드를 누르면 전체 수순 분석 · 태그는 그 판의 실수 유형 (테두리: 집중 과제)</small></h2><div class="card">`;
+  h+=`<section id="s-recent" data-view="games"><h2>최근 게임<small>태그는 그 판의 실수 유형 · 파란 테두리는 집중 과제</small></h2><div class="card">`;
   S.recent.forEach((g,gi)=>{
     if(gi===RECENT_N) h+=`<div class="fold" id="fold-recent" hidden>`;
     const how={checkmated:'메이트',resigned:'기권',timeout:'시간',abandoned:'포기',agreed:'합의',repetition:'반복',stalemate:'스테일',insufficient:'기물부족'};
     const endby=g.outcome==='W'?how[g.opp_result]:how[g.my_result];
     const w=g.worst; const wid=`rw${gi}`; const worstPly=w?plyOf(w)-1:null;
-    h+=`<div class="game"><div class="row"><div class="res ${g.outcome}">${g.outcome==='W'?'승':g.outcome==='L'?'패':'무'}</div><div class="m">
-      <a href="${gameLink(g.url)}" style="color:inherit;display:block"><div class="h"><b>${g.color==='w'?'백':'흑'} vs ${esc(g.opp)} (${g.opp_elo})</b><span class="s dt">${g.date} ›</span></div>
+    h+=`<div class="game"><a class="grow" href="${gameLink(g.url)}"><div class="res ${g.outcome}">${g.outcome==='W'?'승':g.outcome==='L'?'패':'무'}</div><div class="m">
+      <div class="h"><b>${g.color==='w'?'백':'흑'} vs ${esc(g.opp)} <span class="elo">${g.opp_elo}</span></b><span class="s dt">${g.date.slice(5)} ›</span></div>
       <div class="s eco">${esc(g.eco_name)}</div>
-      <div class="s">${endby||''} · 정확도 ${g.accuracy}% · 대실수 ${g.blunders} 실수 ${g.mistakes}${g.hung?` · 방치 ${g.hung}`:''}${g.missed_mate?` · 외통놓침 ${g.missed_mate}`:''} · 종료시 시계 ${clk(g.my_final_clock)} / ${clk(g.opp_final_clock)}</div>
-      ${spark(g.evals, worstPly)}</a>
+      <div class="s">정확도 ${g.accuracy}% · 대실수 ${g.blunders}${endby?` · ${endby}`:''} · 시계 ${clk(g.my_final_clock)}</div></div></a>
+      ${spark(g.evals, worstPly)}
       ${g.cats&&g.cats.length?`<div class="ctags">${g.cats.map(([k,n])=>catTag(k,FOCUS.includes(k)?'rep':'').replace('</span>',`${n>1?` ×${n}`:''}</span>`)).join('')}</div>`:''}
-      ${w&&w.wp_loss>=10?`<div class="w">결정적 실수 <span class="mono">${mv(w)}</span> → 정답 <span class="mono">${esc(w.best)}</span> (${ev(w.cp_before)} → ${ev(w.cp_after)}, 남은시간 ${clk(w.clock)})</div>`:''}
-      <div class="links">${w&&w.fen?`<span class="btn" data-expand="${wid}">장면 보기</span>`:''}<a href="${gameLink(g.url)}">전체 분석 →</a><a href="${esc(g.url)}" target="_blank" rel="noopener">체스닷컴 ↗</a></div>
-      ${w&&w.fen?`<div id="${wid}" hidden data-w='${esc(JSON.stringify({...w,color:g.color,opp:g.opp,date:g.date,url:g.url}))}'></div>`:''}
-    </div></div></div>`;
+      ${w&&w.fen&&w.wp_loss>=10?`<div class="w" data-expand="${wid}" role="button">결정적 실수 <span class="mono">${mv(w)}</span> → <span class="mono">${esc(w.best)}</span> <span class="sub">${ev(w.cp_before)} → ${ev(w.cp_after)}</span><span class="tg">장면 보기</span></div>
+      <div id="${wid}" hidden data-w='${esc(JSON.stringify({...w,color:g.color,opp:g.opp,date:g.date,url:g.url}))}'></div>`:''}
+    </div>`;
   });
   if(S.recent.length>RECENT_N) h+=`</div><div class="more"><span class="btn" data-fold="fold-recent" data-unit="판">나머지 ${S.recent.length-RECENT_N}판 보기</span></div>`;
   h+='</div></section>';
-  h+=`<section data-view="mistakes" class="subnav"><div class="tabs" id="subtabs"><button data-sub="cats">유형별</button><button data-sub="open">오프닝별</button><button data-sub="worst">큰 실수</button></div></section>`;
+  h+=subnav('mistakes');
   h+=catsSection(S);
-  h+=openingSection(S);
   // 최악의 실수
   const WORST_N=8;
-  h+=`<section id="s-worst" data-view="mistakes" data-sub="worst"><h2>가장 큰 실수<small>승률 30%p 이상 손해 · 빨강 내 수, 초록 정답</small></h2><div class="card">`;
+  h+=`<section id="s-worst" data-view="mistakes" data-sub="worst"><h2>가장 큰 실수<small>한 수에 승률을 30%p 이상 잃은 수</small></h2><div class="card">`;
   if(!S.worst.length) h+='<div class="empty">없음</div>';
-  S.worst.forEach((w,i)=>{ if(i===WORST_N) h+=`<div class="fold" id="fold-worst" hidden>`; h+= i<3 ? blunderCard(w) : blunderRow(w,`ww${i}`); });
+  S.worst.forEach((w,i)=>{ if(i===WORST_N) h+=`<div class="fold" id="fold-worst" hidden>`; h+=blunderRow(w,`ww${i}`); });
   if(S.worst.length>WORST_N) h+=`</div><div class="more"><span class="btn" data-fold="fold-worst" data-unit="개">나머지 ${S.worst.length-WORST_N}개 보기</span></div>`;
   h+='</div></section>';
-  h+=repSection(S);
+  h+=subnav('stats')+repSection(S);
   // 시간
-  h+=`<section id="s-time" data-view="stats"><h2>시간 관리</h2><div class="card">${legend()}<div class="sub" style="margin-bottom:6px">N수 시점 남은 시간 (중앙값)</div>`;
+  h+=`<section id="s-time" data-view="stats" data-sub="time"><h2>시간 관리</h2><div class="card">${legend()}<div class="sub" style="margin-bottom:6px">N수 시점 남은 시간 (중앙값)</div>`;
   h+=bars(t.clock_at.filter(r=>r.me!=null&&r.opp!=null).map(r=>({label:`${r.move}수`,me:r.me,opp:r.opp,fmt:clk})),600);
   h+=`</div><div class="tiles">
     <div class="tile"><div class="k">시간패</div><div class="v">${t.timeouts}</div><div class="d">이기던 판 ${t.timeouts_winning} · 상대 시간패 ${t.opp_timeouts}</div></div>
@@ -502,7 +441,7 @@ function render(){
   if(tl){
     const pick=(arr,l)=>arr.find(x=>x.label===l)||{};
     const aL=pick(tl.after,'직전 판 패배'), aW=pick(tl.after,'직전 판 승리');
-    h+=`<section id="s-tilt" data-view="stats"><h2>틸트·세션<small>30분 이상 비면 새 세션으로 봄 · 괄호는 판 수</small></h2><div class="tiles">
+    h+=`<section id="s-tilt" data-view="stats" data-sub="session"><h2>틸트·세션<small>30분 이상 비면 새 세션으로 봄 · 괄호는 판 수</small></h2><div class="tiles">
       <div class="tile"><div class="k">직전 판 패배 후 승률</div><div class="v" style="color:${aL.score!=null&&aL.score<=o.score-8?'var(--loss)':'inherit'}">${pct(aL.score)}</div><div class="d">${aL.n||0}판 · 승리 후 ${pct(aW.score)} (${aW.n||0}판)</div></div>
       <div class="tile"><div class="k">세션</div><div class="v">${tl.sessions.n}</div><div class="d">보통 ${tl.sessions.median_len}판 · 최장 ${tl.sessions.max_len}판 · 6판 이상 ${tl.sessions.long}회</div></div>
     </div>`;
@@ -512,24 +451,24 @@ function render(){
     h+=`<div class="card"><div class="sub" style="margin-bottom:6px">시간대별 승률 (KST)</div>${sb(tl.hours)}</div></section>`;
   }
   // 국면
-  h+=`<section id="s-phase" data-view="stats"><h2>국면별</h2><div class="card"><table><tr><th>국면</th><th class="n">수</th><th class="n">정확도</th><th class="n">상대</th><th class="n">대실수율</th></tr>`;
+  h+=`<section id="s-phase" data-view="stats" data-sub="phase"><h2>국면별</h2><div class="card"><table><tr><th>국면</th><th class="n">수</th><th class="n">정확도</th><th class="n">상대</th><th class="n">대실수율</th></tr>`;
   for(const p of S.phase) h+=`<tr><td>${p.label}</td><td class="n">${p.moves}</td><td class="n">${p.accuracy}%</td><td class="n">${p.opp_accuracy}%</td><td class="n">${p.blunder_rate}%</td></tr>`;
   h+=`</table></div>`;
   if(S.blunder_by_move.length) h+=`<div class="card"><div class="sub" style="margin-bottom:6px">수 구간별 대실수율</div>${bars(S.blunder_by_move.map(b=>({label:b.label+'수',me:b.rate,fmt:pct})),Math.max(...S.blunder_by_move.map(b=>b.rate),1))}</div>`;
   h+='</section>';
   const cw=c.winning, cl=c.losing;
-  h+=`<section data-view="stats"><h2>마무리와 역전</h2><div class="tiles">
+  h+=`<section data-view="stats" data-sub="phase"><h2>마무리와 역전</h2><div class="tiles">
     <div class="tile"><div class="k">+3 이상 유리했던 판</div><div class="v">${cw.n?Math.round(cw.won/cw.n*100):0}% 승</div><div class="d">${cw.n}판 중 ${cw.won}승 ${cw.draw}무 <b style="color:var(--loss)">${cw.lost}패</b></div></div>
     <div class="tile"><div class="k">-3 이하 불리했던 판</div><div class="v">${cl.n?Math.round(cl.won/cl.n*100):0}% 역전</div><div class="d">${cl.n}판 중 ${cl.won}승 ${cl.draw}무 ${cl.lost}패</div></div>
   </div></section>`;
   const hungRows=Object.entries(tc.hung).sort((a,b)=>b[1]-a[1]);
-  h+=`<section data-view="stats"><h2>전술</h2><div class="tiles">
+  h+=`<section data-view="stats" data-sub="phase"><h2>전술</h2><div class="tiles">
     <div class="tile"><div class="k">기물 방치 (한 수에 잡히는 기물)</div><div class="v">${tc.hung_total}</div><div class="d">판당 ${tc.hung_pg} · ${hungRows.map(([k,v])=>`${k} ${v}`).join(' · ')||'-'}<br>시간 1분 이상 남았을 때 ${tc.hung_with_time}회</div></div>
     <div class="tile"><div class="k">공짜 기물 안 잡음</div><div class="v">${tc.missed_free}</div><div class="d">잡는 수가 최선(+2 이상)인데 다른 수</div></div>
     <div class="tile"><div class="k">외통 놓침</div><div class="v">${tc.missed_mate_total}</div><div class="d">${Object.entries(tc.missed_mate).map(([k,v])=>`${k}${k==='5'?'+':''}수 외통 ${v}`).join(' · ')||'-'}</div></div>
   </div></section>`;
   if(S.monthly.length>1){
-    h+=`<section data-view="stats"><h2>월별 추이</h2><div class="card"><table><tr><th>월</th><th class="n">판</th><th class="n">승률</th><th class="n">정확도</th><th class="n">대실수/판</th><th class="n">레이팅</th></tr>`;
+    h+=`<section data-view="stats" data-sub="session"><h2>월별 추이</h2><div class="card"><table><tr><th>월</th><th class="n">판</th><th class="n">승률</th><th class="n">정확도</th><th class="n">대실수/판</th><th class="n">레이팅</th></tr>`;
     for(const m of S.monthly) h+=`<tr><td>${m.month}</td><td class="n">${m.games}</td><td class="n">${m.score}%</td><td class="n">${m.accuracy}%</td><td class="n">${m.blunders_pg}</td><td class="n">${m.rating}</td></tr>`;
     h+='</table></div></section>';
   }
@@ -546,4 +485,4 @@ document.querySelectorAll('#tabs button').forEach(b=>b.addEventListener('click',
 try{const s=localStorage.getItem('chess-window'); if(s&&DATA.windows[s]) W=s;}catch(e){}
 render();
 { const q=new URLSearchParams(location.search); if(q.get('w')&&DATA.windows[q.get('w')]){ W=q.get('w'); render(); } if(q.get('weak')!=null) openSheet(+q.get('weak'));
-  if(q.get('cat')&&catData(DATA.windows[W],q.get('cat'))){ VIEW='mistakes'; setSub('cats'); showCat(q.get('cat'),true); } }
+  if(q.get('cat')&&catData(DATA.windows[W],q.get('cat'))){ VIEW='mistakes'; setSub('mistakes','cats'); showCat(q.get('cat'),true); } }

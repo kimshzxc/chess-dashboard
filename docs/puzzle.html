@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="dark light">
 <meta name="theme-color" content="#0e1014">
-<title>오늘의 퍼즐</title>
+<title>연습 · 퍼즐</title>
 <script>try{var m=localStorage.getItem('chess-mode');if(m)document.documentElement.dataset.mode=m}catch(e){}</script>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" type="image/png" href="icon-192.png">
@@ -21,11 +21,12 @@
 </head>
 <body data-tab="puzzle">
 <header>
-  <div class="top"><h1>퍼즐</h1><span class="btn" id="tbtn"></span></div>
+  <div class="ptop"><h1>연습</h1><span class="btn" id="tbtn"></span></div>
   <div id="tpanel-slot"></div>
+  <div id="pnav"></div>
 </header>
 <main id="main"><div class="sk" style="height:70px;margin-top:12px"></div><div class="sk" style="height:360px;max-width:440px;margin:14px auto 0"></div></main>
-<footer>퍼즐은 내 게임에서 승률 20%p 이상 잃은 수의 국면입니다. 정답은 스톡피시의 최선 수 하나이며, 비슷하게 좋은 다른 수는 오답으로 처리됩니다.</footer>
+<footer>퍼즐은 내 게임에서 승률을 20%p 이상 잃은 국면입니다. 스톡피시의 최선 수와, 그와 비슷하게 좋은 수를 정답으로 인정합니다.</footer>
 <script src="shared.js"></script>
 <script type="module" src="puzzle.js"></script>
 </body>

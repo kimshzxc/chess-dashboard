@@ -3,8 +3,7 @@
    train-done (localStorage)  {오프닝 id: {라인 번호: {clean: 실수 없이 끝낸 횟수, n: 끝낸 횟수, last: 날짜}}} */
 document.body.insertAdjacentHTML('afterbegin', await fetch('pieces.svg').then(r=>r.text()));
 const BOOK = await fetch('book.json',{cache:'no-cache'}).then(r=>r.ok?r.json():null).catch(()=>null);
-$('#tpanel-slot').innerHTML=themePanel(); applyMode();
-$('#backbtn').innerHTML=icon('back')+'오프닝 성적';
+$('#tpanel-slot').innerHTML=themePanel(); applyMode(); $('#pnav').innerHTML=practiceNav('train');
 const Q=new URLSearchParams(location.search);
 const OPS=(BOOK&&BOOK.openings)||{};
 const O=OPS[Q.get('o')];
@@ -23,10 +22,9 @@ function listHTML(){
   const all=Object.values(OPS); if(!all.length) return '<div class="empty">연습 라인이 아직 만들어지지 않았습니다. 게임이 분석되면 몇 분 안에 생깁니다.</div>';
   const rank=o=>o.verdict.startsWith('weak')?0:o.verdict==='even'?1:2;
   all.sort((a,b)=>rank(a)-rank(b)||b.n-a.n);
-  let h=`<h1 class="tt">오프닝 연습</h1><div class="sub">취약한 오프닝부터 · 내 15수째까지 직접 두어 봅니다</div><div class="card" style="margin-top:12px">`;
+  let h=`<div class="sub" style="margin-top:14px">취약한 오프닝부터 · 내 15수째까지 직접 두어 봅니다</div><div class="card" style="margin-top:10px">`;
   for(const o of all){ const v=VERD[o.verdict]||VERD.even, d=DONE[o.id]||{}, cl=o.lines.filter((_,i)=>d[i]&&d[i].clean).length;
-    h+=`<a class="trow" href="train.html?o=${encodeURIComponent(o.id)}"><div><div class="ok"><span class="mono">${esc(o.key)}</span></div><div class="nm">${o.color==='w'?'백':'흑'} · ${SIDE[o.side]} · 주로 ${esc(o.name)} · ${o.n}판 ${o.score}%</div>
-      <div class="nm">라인 ${o.lines.length}개${cl?` · 실수 없이 끝낸 라인 ${cl}개`:''}</div></div><span class="chip ${v[1]}">${v[0]}</span></a>`; }
+    h+=`<a class="trow" href="train.html?o=${encodeURIComponent(o.id)}"><div><div class="ok"><span class="mono">${esc(o.key)}</span></div><div class="nm">${o.color==='w'?'백':'흑'} · ${esc(o.name)} · ${o.n}판 ${o.score}% · 라인 ${o.lines.length}개${cl?` · 완료 ${cl}`:''}</div></div>${o.verdict==='even'?'':`<span class="chip ${v[1]}">${v[0]}</span>`}</a>`; }
   return h+'</div>';
 }
 
@@ -51,7 +49,7 @@ function finish(){
 }
 function headHTML(){
   const v=VERD[O.verdict]||VERD.even, d=DONE[O.id]||{};
-  let h=`<div class="thead"><div><h1 class="tt"><span class="mono">${esc(O.key)}</span></h1><div class="sub">${O.color==='w'?'백':'흑'} · ${SIDE[O.side]} · 주로 ${esc(O.name)} · ${O.n}판 승률 ${O.score}%</div></div><span class="chip ${v[1]}">${v[0]}</span></div>`;
+  let h=`<a class="backl" href="train.html">‹ 오프닝 목록</a><div class="thead"><div><h1 class="tt"><span class="mono">${esc(O.key)}</span></h1><div class="sub">${O.color==='w'?'백':'흑'} · ${esc(O.name)} · ${O.n}판 승률 ${O.score}%</div></div><span class="chip ${v[1]}">${v[0]}</span></div>`;
   h+=`<div class="pzmodes">${O.lines.map((l,i)=>`<a class="${i===LI?'on':''}" data-line="${i}" href="train.html?o=${encodeURIComponent(O.id)}&l=${i}">${d[i]&&d[i].clean?'<i class="ck"></i>':''}${esc(l.name)}</a>`).join('')}</div>`;
   return h+`<div class="sub lnote">${esc(line().note)}${line().fix?` · 평소 틀리던 자리 ${line().fix}곳`:''}</div>`;
 }
@@ -83,7 +81,6 @@ function render(){
   } else h+=`<div class="acts"><span class="btn" id="hint">힌트</span><span class="btn" id="show">정답 보기</span><span class="btn" id="again">처음부터</span></div>`;
   h+=`<details class="card allm"><summary>이 라인 전체 수순 보기</summary><div class="tmoves full">${P.map((x,i)=>`${num(x,i===0)?`<span class="num">${num(x,i===0)}</span>`:''}<span class="m ${x.mine?'me':''}">${esc(x.san)}</span>`).join('')}</div>
     ${P.filter(x=>x.bad).map(x=>`<div class="sub">${x.move}수: 평소 <span class="mono">${esc(x.bad.san)}</span> (${x.bad.n}번, 평균 −${x.bad.loss}%p) 대신 <b class="mono">${esc(x.san)}</b></div>`).join('')}</details>`;
-  h+=`<div class="more"><a class="btn" href="train.html">다른 오프닝 연습</a></div>`;
   const keep=document.querySelector('details.allm'); const open=keep&&keep.open;
   $('#main').innerHTML=h; if(open) document.querySelector('details.allm').open=true;
   applyTheme();

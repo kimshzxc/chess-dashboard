@@ -49,3 +49,6 @@ header{position:static;border-bottom:0;padding:calc(14px + env(safe-area-inset-t
 .trow:last-child{border-bottom:0}
 .trow .ok{font-size:15px;font-weight:600}
 .trow .nm{color:var(--text2);font-size:12.5px;margin-top:2px;line-height:1.4}
+.backl{display:inline-block;margin-top:14px;font-size:14px;font-weight:600}
+.tt{margin-top:6px}
+header .top{display:none}
