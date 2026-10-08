@@ -248,24 +248,21 @@ def run(c, base, server, shots):
     snap("home")
     co = S.get("coach") or {}
     if co.get("cats"):
-        check("코치 브리핑: 집중 과제 카드가 비중 순으로 나온다", c.ev("document.querySelectorAll('#s-coach .focus').length") == len(co["focus"])
-              and c.ev("[...document.querySelectorAll('#s-coach .focus .shr b')].map(e=>parseFloat(e.textContent))") == [x["share"] for x in co["cats"] if x["key"] in co["focus"]],
-              c.ev("[...document.querySelectorAll('#s-coach .focus .nm b')].map(e=>e.textContent)"))
-        check("코치 브리핑: 직전 판 피드백과 체크리스트", c.ev("!!document.querySelector('#s-coach .lastg')") and c.ev("document.querySelectorAll('#s-coach .checklist li').length") == len(co["focus"]),
+        check("홈은 레이팅이 맨 위, 그다음이 집중 과제", c.ev("[...document.querySelectorAll('#main>section:not([hidden])')].map(s=>s.id||s.className)")[:2] == ["hero", "s-coach"])
+        check("집중 과제가 비중 순으로 나온다", c.ev("document.querySelectorAll('#s-coach .frow').length") == len(co["focus"])
+              and c.ev("[...document.querySelectorAll('#s-coach .frow .shr b')].map(e=>parseFloat(e.textContent))") == [x["share"] for x in co["cats"] if x["key"] in co["focus"]],
+              c.ev("[...document.querySelectorAll('#s-coach .frow .nm b')].map(e=>e.textContent)"))
+        check("직전 판 피드백과 두기 전 질문", c.ev("!!document.querySelector('#s-coach .lastg')") and c.ev("[...document.querySelectorAll('#s-coach .frow .q')].filter(e=>e.textContent.trim()).length") == len(co["focus"]),
               (c.ev("document.querySelector('#s-coach .lastg .v')?.innerText") or "")[:50])
-        dots = c.ev("[...document.querySelectorAll('#s-coach .focus')].map(f=>[f.querySelectorAll('.seq i').length, f.querySelectorAll('.seq i.hit').length])")
+        dots = c.ev("[...document.querySelectorAll('#s-coach .frow')].map(f=>[f.querySelectorAll('.seq i').length, f.querySelectorAll('.seq i.hit').length])")
         want = [[x["recent"]["k"], x["recent"]["games"]] for x in co["cats"] if x["key"] in co["focus"]]
-        check("코치 브리핑: 최근 판 점이 데이터와 같다", dots == want, dots)
+        check("집중 과제: 최근 판 점이 데이터와 같다", dots == want, dots)
         key = co["focus"][-1]
-        c.tap(f'#s-coach .focus [data-opencat="{key}"]'); c.pump(0.8)
-        check("사례 보기: 복기 탭에서 그 유형이 펼쳐진다", c.ev("document.querySelector('#tabbar a.on')?.dataset.tab") == "mistakes" and c.ev("document.querySelector('#s-cats .cat.open')?.id") == "cat-" + key
+        c.tap(f'#s-coach .frow[data-opencat="{key}"]'); c.pump(0.8)
+        check("집중 과제를 누르면 복기 탭에서 그 유형이 펼쳐진다", c.ev("document.querySelector('#tabbar a.on')?.dataset.tab") == "mistakes" and c.ev("document.querySelector('#s-cats .cat.open')?.id") == "cat-" + key
               and c.ev("!!document.querySelector('#s-cats .cat.open .viewer svg.board')") and c.ev("!document.querySelector('#s-cats').hidden"))
         c.ev("history.back()"); c.pump(0.8)
         check("뒤로 가면 홈", c.ev("document.querySelector('#tabbar a.on')?.dataset.tab") == "home")
-    if c.ev("!!document.querySelector('#s-coach .repcard .oprow')"):
-        c.tap("#s-coach .repcard .oprow"); ok = c.wait("document.querySelector('#sheet').classList.contains('open') && document.querySelectorAll('#sheet .diag li').length>0", 3)
-        check("홈의 취약·강점 오프닝을 누르면 코칭 시트", ok, c.ev("document.querySelector('#sheet-title').textContent")); snap("home_rep_sheet")
-        c.tap("#sheet-x", None); c.pump(0.4)
     hints = [w for w in S["weaknesses"] if w["level"] == "hint"]
     lv = c.ev("[...document.querySelectorAll('.weak')].map(e=>e.classList.contains('hint'))")
     check("근거 약한 보완점은 '표본 부족'으로 뒤에 모인다", lv == sorted(lv) and sum(lv) == len(hints)
@@ -320,21 +317,6 @@ def run(c, base, server, shots):
             check("오프닝별 보기로 전환", c.ev("!document.querySelector('#s-open').hidden && document.querySelector('#s-cats').hidden") and set(c.ev(VIS)) == {"mistakes"})
             o = c.ev(OVER); check("가로 넘침 없음 (오프닝별)", o[0] <= o[1], o)
             ops = S["openings"].get("w") or []
-            R = S.get("repertoire") or {}
-            nrows = sum(len(R[cc][sd]) for cc in "wb" for sd in ("mine", "opp") if R.get(cc) and R[cc].get("base"))
-            if nrows:
-                check("오프닝 성적표: 묶음 수가 데이터와 같다", c.ev("document.querySelectorAll('#s-rep .oprow').length") == nrows, nrows)
-                r0 = R["w"]["mine"][0]
-                check("오프닝 성적표: 첫 줄의 승률", f"{r0['score']}%" == c.ev("document.querySelector('#s-rep .oprow .os b').textContent"), r0["key"])
-                snap("rep")
-                c.tap('#s-rep .oprow[data-rep="w|mine|0"]'); ok = c.wait("document.querySelector('#sheet').classList.contains('open') && document.querySelectorAll('#sheet .diag li').length>0", 3)
-                check("오프닝을 누르면 코칭 시트: 판정·진단·할 일", ok and r0["key"] in c.ev("document.querySelector('#sheet-title').textContent") and c.ev("!!document.querySelector('#sheet .verdict')")
-                      and c.ev("document.querySelectorAll('#sheet .tiles3 .tile').length") == 3, c.ev("document.querySelector('#sheet .verdict')?.innerText.slice(0,60)"))
-                o = c.ev("[document.querySelector('#sheet-body').scrollWidth, document.querySelector('#sheet-body').clientWidth]"); check("가로 넘침 없음 (오프닝 코칭)", o[0] <= o[1], o)
-                if r0["trouble"]:
-                    c.tap("#sheet [data-expand]"); check("코칭 시트의 반복 실수: 보드가 그려진다", c.wait("!!document.querySelector('#sheet .viewer svg.board')", 3))
-                snap("rep_sheet")
-                c.tap("#sheet-x", None); c.pump(0.4)
             if ops:
                 check("오프닝 프로필: 15수 안 실수와 수별 막대", str(ops[0]["mist"]["per_game"]) in (c.ev("document.querySelector('#op-w .tiles3')?.innerText") or "")
                       and c.ev("document.querySelectorAll('#op-w .mhist rect').length") == sum(1 for v in ops[0]["mist"]["by_move"] if v), c.ev("document.querySelector('#op-w .tiles3')?.innerText.replace(/\\n/g,' ').slice(0,60)"))
@@ -347,6 +329,22 @@ def run(c, base, server, shots):
             check("큰 실수 보기로 전환", c.ev("!document.querySelector('#s-worst').hidden && document.querySelector('#s-open').hidden"))
             c.tap('#subtabs button[data-sub="cats"]', None); c.pump(0.4)
         if tab == "stats":
+            R = S.get("repertoire") or {}
+            nrows = sum(len(R[cc][sd]) for cc in "wb" for sd in ("mine", "opp") if R.get(cc) and R[cc].get("base"))
+            if nrows:
+                check("오프닝 성적표: 묶음 수가 데이터와 같다", c.ev("document.querySelectorAll('#s-rep .oprow').length") >= nrows, nrows)
+                r0 = R["w"]["mine"][0]
+                check("오프닝 성적표: 첫 줄의 승률", f"{r0['score']}%" == c.ev("document.querySelector('#s-rep .oprow[data-rep=\"w|mine|0\"] .os b').textContent"), r0["key"])
+                snap("rep")
+                c.tap('#s-rep .repcard:not(#rep-sum) .oprow[data-rep="w|mine|0"]'); ok = c.wait("document.querySelector('#sheet').classList.contains('open') && document.querySelectorAll('#sheet .diag li').length>0", 3)
+                check("오프닝을 누르면 코칭 시트: 판정·진단·할 일", ok and r0["key"] in c.ev("document.querySelector('#sheet-title').textContent") and c.ev("!!document.querySelector('#sheet .verdict')")
+                      and c.ev("document.querySelectorAll('#sheet .tiles3 .tile').length") == 3, c.ev("document.querySelector('#sheet .verdict')?.innerText.slice(0,60)"))
+                o = c.ev("[document.querySelector('#sheet-body').scrollWidth, document.querySelector('#sheet-body').clientWidth]"); check("가로 넘침 없음 (오프닝 코칭)", o[0] <= o[1], o)
+                if r0["trouble"]:
+                    c.tap("#sheet [data-expand]"); check("코칭 시트의 반복 실수: 보드가 그려진다", c.wait("!!document.querySelector('#sheet .viewer svg.board')", 3))
+                snap("rep_sheet")
+                c.tap("#sheet-x", None); c.pump(0.4)
+            check("취약·강점 오프닝 요약이 통계 탭에 있다", not nrows or c.ev("!document.querySelector('#s-coach .oprow') && !document.querySelector('#s-open .oprow[data-rep]')"))
             cut = c.ev("[...document.querySelectorAll('#main>section:not([hidden]) .bar span')].filter(s=>s.getBoundingClientRect().width>0 && s.getBoundingClientRect().right > s.closest('.card').getBoundingClientRect().right-4).length")
             check("막대 옆 글씨가 카드 안에 들어온다", cut == 0, cut)
             snap("stats")

@@ -220,12 +220,10 @@ const trendChip=(t)=>{ const m=TREND[t&&t.status]||TREND.insufficient; return `<
 const seqDots=(r)=>`<span class="seq" role="img" aria-label="최근 ${r.k}판 중 ${r.games}판에서 발생">${r.seq.map(v=>`<i class="${v?'hit':''}"></i>`).join('')}</span>`;
 const recentLine=(c,chip=true)=>`<div class="fline">${seqDots(c.recent)}<span>최근 ${c.recent.k}판 중 <b>${c.recent.games}판</b>에서 나옴</span>${chip?trendChip(c.trend):''}</div>`;
 let OPEN_CAT=null;
-function focusCard(c,i){
+function focusRow(c,i){
   const m=catOf(c.key);
-  return `<div class="card focus"><div class="fh"><span class="rk">${i+1}</span><div class="nm"><b>${esc(m.n)}</b><div class="sub">${CATG[m.g]} · ${c.n}회 · 한 번에 평균 −${c.avg}%p</div></div><div class="shr"><b>${c.share}%</b><span>잃은 승률 중</span></div></div>
-    ${recentLine(c)}
-    <div class="rule"><span>두기 전에</span>${esc(m.rule)}</div>
-    <div class="links"><a class="btn" href="#mistakes" data-opencat="${c.key}">사례 보기</a>${c.puzzles?`<a class="btn" href="puzzle.html?cat=${c.key}">이 유형 퍼즐 ${c.puzzles}개</a>`:''}</div></div>`;
+  return `<a class="frow" href="#mistakes" data-opencat="${c.key}"><span class="rk">${i+1}</span><div class="nm"><b>${esc(m.n)}</b><div class="q">${esc(m.q)}</div>
+    <div class="fline">${seqDots(c.recent)}<span>최근 ${c.recent.k}판 중 ${c.recent.games}판</span>${trendChip(c.trend)}</div></div><div class="shr"><b>${c.share}%</b></div></a>`;
 }
 function lastGameCard(S){
   const g=S.recent[0]; if(!g) return '';
@@ -242,12 +240,8 @@ function lastGameCard(S){
 function coachSection(S){
   const co=coachOf(S); if(!co.cats.length) return '';
   const focus=co.focus.map(k=>catData(S,k)).filter(Boolean);
-  let h=`<section id="s-coach" data-view="home"><h2>코치 브리핑<small>${WNAME[W]} ${co.games}판 · 승률을 10%p 이상 잃은 수 ${co.n}개(판당 ${co.per_game}개)를 유형별로 나눔</small></h2>`;
-  h+=lastGameCard(S);
-  h+=`<h3>지금 고칠 ${focus.length}가지 <span class="sub">잃은 승률이 큰 순서</span></h3>`+focus.map(focusCard).join('');
-  h+=repHome(S);
-  h+=`<h3>두기 전 체크리스트</h3><div class="card checklist"><ol>${focus.map(c=>`<li>${esc(catOf(c.key).q)}</li>`).join('')}</ol><div class="sub">위 ${focus.length}가지 유형에서 뽑은 질문입니다. 매 수 이 순서로만 확인해도 잃은 승률의 ${Math.round(focus.reduce((a,c)=>a+c.share,0))}%가 걸립니다.</div></div>`;
-  return h+`<div class="more"><a class="btn" href="#mistakes" data-opencat="${focus[0]?focus[0].key:''}">유형 ${co.cats.length}가지 전체 보기</a></div></section>`;
+  return `<section id="s-coach" data-view="home"><h2>집중 과제<small>잃은 승률이 가장 큰 실수 유형 ${focus.length}가지와 두기 전 확인할 질문 · 누르면 사례</small></h2>
+    <div class="card flist">${focus.map(focusRow).join('')}</div>${lastGameCard(S)}</section>`;
 }
 /* 유형 하나의 상황 진단: 시간이 없어서인지, 서둘러서인지, 이기고 있어서인지 */
 function catDiag(c){
@@ -319,15 +313,14 @@ function repRanked(S){
     .filter(x=>{ const k=x.c+x.r.n+'/'+x.r.win+'/'+x.r.loss+x.r.name; if(seen.has(k)) return false; seen.add(k); return true; }); };   // 두 갈래에 같은 판 묶음이 겹치면 하나만
   return {weak:pick('weak',1), strong:pick('strong',-1)};
 }
-function repHome(S){
+function repSummary(S){
   const k=repRanked(S); if(!k.weak.length&&!k.strong.length) return '';
-  const col=(title,arr)=>arr.length?`<div class="k" style="margin-top:12px">${title}</div>`+arr.slice(0,3).map(x=>repRow(x.r,x.id).replace('<div class="nm">',`<div class="nm">${x.c==='w'?'백':'흑'} · ${SIDE[x.side]} · `)).join(''):'';
-  return `<h3>오프닝 성적 <span class="sub">같은 색 내 평균 승률과 비교 · 누르면 코칭</span></h3><div class="card repcard">${col('취약한 오프닝',k.weak)}${col('강한 오프닝',k.strong)}
-    <div class="more"><a class="btn" href="#mistakes" data-gosub="open">오프닝 성적표 전체 보기</a></div></div>`;
+  const col=(title,arr)=>arr.length?`<div class="k">${title}</div>`+arr.slice(0,3).map(x=>repRow(x.r,x.id).replace('<div class="nm">',`<div class="nm">${x.c==='w'?'백':'흑'} · ${SIDE[x.side]} · `)).join(''):'';
+  return `<div class="card repcard" id="rep-sum">${col('취약한 오프닝',k.weak)}${col('강한 오프닝',k.strong)}</div>`;
 }
 function repSection(S){
   const R=S.repertoire; if(!R) return '';
-  let h=`<section id="s-rep" data-view="mistakes" data-sub="open"><h2>오프닝 성적표<small>내가 고른 수순과 상대가 고른 수순별 승률 · 같은 색의 내 평균과 비교 · 누르면 그 오프닝의 코칭</small></h2>`;
+  let h=`<section id="s-rep" data-view="stats"><h2>오프닝 성적<small>내가 고른 수순과 상대가 고른 수순별 승률 · 같은 색의 내 평균과 비교 · 누르면 그 오프닝의 코칭</small></h2>`+repSummary(S);
   for(const [c,name] of [['w','백'],['b','흑']]){
     const B=R[c]&&R[c].base; if(!B) continue;
     h+=`<div class="card repcard"><h3 style="margin-top:0">${name}으로 <span class="sub">${B.n}판 · 평균 승률 ${B.score}%</span></h3>`;
@@ -381,8 +374,7 @@ function openRep(id){
   $('#sheet').classList.add('open'); document.body.style.overflow='hidden';
 }
 document.addEventListener('click',(e)=>{
-  const t=e.target.closest('[data-rep]'); if(t){ openRep(t.dataset.rep); return; }
-  const g=e.target.closest('[data-gosub]'); if(g){ e.preventDefault(); setSub(g.dataset.gosub); if(VIEW!=='mistakes'){ VIEW='mistakes'; history.pushState(null,'','#mistakes'); applyView(); } window.scrollTo(0,0); }
+  const t=e.target.closest('[data-rep]'); if(t) openRep(t.dataset.rep);
 });
 
 function spark(evals, worstPly){
@@ -435,10 +427,10 @@ function render(){
   if(!S){ $('#subtitle').textContent=''; $('#main').innerHTML='<div class="empty">이 기간에 분석된 래피드 게임이 없습니다.</div>'; return; }
   const o=S.overview, t=S.time, c=S.conversion, tc=S.tactics;
   $('#subtitle').textContent = `${o.games}판 · 백 ${pct(o.score_w)} · 흑 ${pct(o.score_b)}`;
-  let h=coachSection(S);
+  let h='';
   const rd=o.rating-o.rating_start;
   const up=rd>0, dn=rd<0; const tot=o.win+o.draw+o.loss||1;
-  h+=`<section class="hero" data-view="home"><div class="herocard">
+  h+=`<section class="hero" id="hero" data-view="home"><div class="herocard">
     <div class="k">래피드 레이팅</div>
     <div class="big">${o.rating}<span class="delta ${up?'up':dn?'down':''}">${up?'▲':dn?'▼':''} ${Math.abs(rd)}</span></div>
     <div class="meta">최고 ${o.rating_best} · ${o.rating_start}에서 시작 · ${o.first_date.slice(5)} ~ ${o.last_date.slice(5)}</div>
@@ -450,12 +442,15 @@ function render(){
     <div class="tile"><div class="k">정확도</div><div class="v">${o.accuracy}%</div><div class="d">상대 ${o.opp_accuracy}%</div></div>
     <div class="tile"><div class="k">대실수/판</div><div class="v">${o.blunders_pg}</div><div class="d">상대 ${o.opp_blunders_pg}</div></div>
   </div>
-  <a class="card pz" href="puzzle.html"><div><b>오늘의 퍼즐 10개</b><div class="sub">${puzzleStreakText()}</div></div><span class="btn on">풀기 ›</span></a>
   </section>`;
-  h+=`<section id="s-weak" data-view="home"><h2>경기 운영 보완점<small>시간·틸트·오프닝 성적 · 통계에서 자동 추출</small></h2>`;
+  h+=coachSection(S);
+  h+=`<section data-view="home" class="pzs"><a class="card pz" href="puzzle.html"><div><b>오늘의 퍼즐 10개</b><div class="sub">${puzzleStreakText()}</div></div><span class="btn on">풀기 ›</span></a></section>`;
+  h+=`<section id="s-weak" data-view="home"><h2>경기 운영<small>시간·틸트 등 통계에서 뽑은 보완점 · 누르면 추이</small></h2>`;
   if(!S.weaknesses.length) h+='<div class="empty">두드러진 약점이 없습니다.</div>';
-  for(const w of S.weaknesses){ const ic={critical:'중요',serious:'주의',warning:'참고',good:'강점',hint:'표본 부족'}[w.level]||'';
+  const WEAK_N=3;
+  for(const w of S.weaknesses){ if(S.weaknesses.indexOf(w)===WEAK_N) h+=`<div class="fold" id="fold-weak" hidden>`; const ic={critical:'중요',serious:'주의',warning:'참고',good:'강점',hint:'표본 부족'}[w.level]||'';
     h+=`<div class="card weak ${w.level}" data-weak="${S.weaknesses.indexOf(w)}"><div class="t"><span class="ic">${ic}</span>${esc(w.title)}</div><p>${esc(w.text)}</p><div class="go">추이 분석 ›</div></div>`; }
+  if(S.weaknesses.length>WEAK_N) h+=`</div><div class="more"><span class="btn" data-fold="fold-weak" data-unit="개">나머지 ${S.weaknesses.length-WEAK_N}개 보기</span></div>`;
   h+='</section>';
   // 최근 게임
   const RECENT_N=6, FOCUS=coachOf(S).focus;
@@ -480,7 +475,6 @@ function render(){
   h+='</div></section>';
   h+=`<section data-view="mistakes" class="subnav"><div class="tabs" id="subtabs"><button data-sub="cats">유형별</button><button data-sub="open">오프닝별</button><button data-sub="worst">큰 실수</button></div></section>`;
   h+=catsSection(S);
-  h+=repSection(S);
   h+=openingSection(S);
   // 최악의 실수
   const WORST_N=8;
@@ -489,6 +483,7 @@ function render(){
   S.worst.forEach((w,i)=>{ if(i===WORST_N) h+=`<div class="fold" id="fold-worst" hidden>`; h+= i<3 ? blunderCard(w) : blunderRow(w,`ww${i}`); });
   if(S.worst.length>WORST_N) h+=`</div><div class="more"><span class="btn" data-fold="fold-worst" data-unit="개">나머지 ${S.worst.length-WORST_N}개 보기</span></div>`;
   h+='</div></section>';
+  h+=repSection(S);
   // 시간
   h+=`<section id="s-time" data-view="stats"><h2>시간 관리</h2><div class="card">${legend()}<div class="sub" style="margin-bottom:6px">N수 시점 남은 시간 (중앙값)</div>`;
   h+=bars(t.clock_at.filter(r=>r.me!=null&&r.opp!=null).map(r=>({label:`${r.move}수`,me:r.me,opp:r.opp,fmt:clk})),600);
