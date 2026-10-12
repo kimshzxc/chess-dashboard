@@ -137,17 +137,14 @@ class WithDb(unittest.TestCase):
         for col in "wb":
             R = S["repertoire"][col]
             self.assertEqual(R["base"]["n"], 12)
-            for side in ("mine", "opp"):
-                self.assertEqual(sum(r["n"] for r in R[side]), 12)            # 모든 판이 한 묶음에만 들어간다
-                for r in R[side]:
-                    self.assertEqual(r["win"] + r["draw"] + r["loss"], r["n"])
-                    self.assertIn(r["verdict"], ("weak", "weak_hint", "strong", "strong_hint", "even"))
-                    self.assertAlmostEqual(r["diff"], r["score"] - R["base"]["score"], places=1)
-            self.assertEqual(R["mine"][0]["key"], "1.e4" if col == "w" else "1…e5")
-        for col in "wb":
-            for o in S["openings"][col]:
-                self.assertEqual(sum(o["mist"]["by_move"]), o["mist"]["n"])
-                self.assertEqual(sum(c["n"] for c in o["mist"]["cats"]), o["mist"]["n"])
+            self.assertEqual(sum(r["n"] for r in R["rows"]), 12)             # 모든 판이 한 묶음에만 들어간다
+            for r in R["rows"]:
+                self.assertEqual(r["win"] + r["draw"] + r["loss"], r["n"])
+                self.assertIn(r["verdict"], ("weak", "weak_hint", "strong", "strong_hint", "even"))
+                self.assertAlmostEqual(r["diff"], r["score"] - R["base"]["score"], places=1)
+                self.assertEqual(sum(r["mist"]["by_move"]), r["mist"]["n"])
+                self.assertEqual(sum(c["n"] for c in r["mist"]["cats"]), r["mist"]["n"])
+            self.assertEqual((R["rows"][0]["id"], R["rows"][0]["name"], R["rows"][0]["key"]), (f"{col}-kings_pawn", "킹스 폰 오프닝", "1.e4 e5"))
         hints = [w["level"] == "hint" for w in S["weaknesses"]]
         self.assertEqual(hints, sorted(hints))            # 근거 약한 항목은 뒤에 모인다
         json.dumps(S, ensure_ascii=False)                 # 직렬화 가능해야 한다
@@ -211,20 +208,23 @@ class WithDb(unittest.TestCase):
         self.assertIsNone(pipeline.book_eval(self.con, AFTER_E4, Eng(), budget))          # 예산이 없으면 계산하지 않는다
         self.assertEqual(pipeline.book_eval(self.con, START, None, [0]), ev)              # 캐시에서
         self.assertEqual(Eng.calls, 1)
-        self.assertEqual(pipeline.build_book(self.con, pipeline.load_games(self.con)), ({}, 0, 0))   # 2수짜리 가짜 게임에는 만들 오프닝이 없다
+        self.assertEqual(pipeline.build_book(self.con, pipeline.load_games(self.con)), ({}, 0, 2))   # 엔진 없이: 백·흑 한 묶음씩 덜 만들어진 것으로 센다
         from collections import defaultdict
-        key = ("e4", "Nf3", "Bc4")
-        short, _, done = pipeline.book_line(self.con, None, [0], "w", key, True, {}, {})
+        idx = pipeline._position_index(pipeline.load_games(self.con))                    # 가짜 게임: 1.e4 e5
+        short, _, done = pipeline.book_line(self.con, None, [0], "b", idx, idx)
         self.assertFalse(done); self.assertEqual([p["san"] for p in short], ["e4"])        # 엔진 없이는 캐시가 끝나는 데서 멈춘다
-        plies, branches, done = pipeline.book_line(self.con, Eng(), [1000], "w", key, True, {}, {})
+        plies, branches, done = pipeline.book_line(self.con, Eng(), [1000], "b", idx, idx)
         self.assertTrue(done); self.assertEqual(branches, [])
-        self.assertEqual(sum(p["mine"] for p in plies), pipeline.EARLY_MOVES)
-        self.assertEqual([p["san"] for p in plies if p["mine"]][:3], list(key))
+        self.assertGreaterEqual(sum(p["mine"] for p in plies), 6)
+        self.assertEqual(plies[0]["san"], "e4"); self.assertEqual(plies[0]["n"], 12)       # 상대의 첫 수는 게임에서 가장 잦은 수
         b = chess.Board()
         for p in plies:                                                                   # 라인의 수는 모두 둘 수 있는 수이고 fen 이 이어진다
             b.push_uci(p["uci"]); self.assertEqual(b.fen(), p["fen"])
-        again, _, done = pipeline.book_line(self.con, None, [0], "w", key, True, {}, {})
+        again, _, done = pipeline.book_line(self.con, None, [0], "b", idx, idx)
         self.assertTrue(done); self.assertEqual(again, plies)                              # 다시 만들 때는 캐시만으로
+        book, n, pending = pipeline.build_book(self.con, pipeline.load_games(self.con), Eng(), 1000)
+        self.assertEqual((sorted(book), pending), (["b-kings_pawn", "w-kings_pawn"], 0))
+        self.assertTrue(all(ln["plies"] for o in book.values() for ln in o["lines"]))
 
     def test_cached_lines_fallback(self):
         self.con.execute("CREATE TABLE pv_cache(fen TEXT, played TEXT, data TEXT, PRIMARY KEY(fen, played))")

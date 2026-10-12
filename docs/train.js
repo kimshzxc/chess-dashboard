@@ -8,7 +8,6 @@ const Q=new URLSearchParams(location.search);
 const OPS=(BOOK&&BOOK.openings)||{};
 const O=OPS[Q.get('o')];
 const VERD={weak:['취약','critical'],weak_hint:['취약 조짐','serious'],strong:['강점','good'],strong_hint:['강점 조짐','good'],even:['평균 수준','']};
-const SIDE={mine:'내가 고른 수순',opp:'상대가 고른 수순'};
 const load=(k,d)=>{ try{ const v=JSON.parse(localStorage.getItem(k)||'null'); return v??d; }catch(e){ return d; } };
 const save=(k,v)=>{ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} };
 const DONE=load('train-done',{});
@@ -24,7 +23,7 @@ function listHTML(){
   all.sort((a,b)=>rank(a)-rank(b)||b.n-a.n);
   let h=`<div class="sub" style="margin-top:14px">취약한 오프닝부터 · 내 15수째까지 직접 두어 봅니다</div><div class="card" style="margin-top:10px">`;
   for(const o of all){ const v=VERD[o.verdict]||VERD.even, d=DONE[o.id]||{}, cl=o.lines.filter((_,i)=>d[i]&&d[i].clean).length;
-    h+=`<a class="trow" href="train.html?o=${encodeURIComponent(o.id)}"><div><div class="ok"><span class="mono">${esc(o.key)}</span></div><div class="nm">${o.color==='w'?'백':'흑'} · ${esc(o.name)} · ${o.n}판 ${o.score}% · 라인 ${o.lines.length}개${cl?` · 완료 ${cl}`:''}</div></div>${o.verdict==='even'?'':`<span class="chip ${v[1]}">${v[0]}</span>`}</a>`; }
+    h+=`<a class="trow" href="train.html?o=${encodeURIComponent(o.id)}"><div><div class="ok"><span class="side">${o.color==='w'?'백':'흑'}</span>${esc(o.name)}</div><div class="nm">${o.key?`<span class="mono">${esc(o.key)}</span> · `:''}${o.n}판 ${o.score}% · 라인 ${o.lines.length}개${cl?` · 완료 ${cl}`:''}</div></div>${o.verdict==='even'?'':`<span class="chip ${v[1]}">${v[0]}</span>`}</a>`; }
   return h+'</div>';
 }
 
@@ -49,7 +48,7 @@ function finish(){
 }
 function headHTML(){
   const v=VERD[O.verdict]||VERD.even, d=DONE[O.id]||{};
-  let h=`<a class="backl" href="train.html">‹ 오프닝 목록</a><div class="thead"><div><h1 class="tt"><span class="mono">${esc(O.key)}</span></h1><div class="sub">${O.color==='w'?'백':'흑'} · ${esc(O.name)} · ${O.n}판 승률 ${O.score}%</div></div><span class="chip ${v[1]}">${v[0]}</span></div>`;
+  let h=`<a class="backl" href="train.html">‹ 오프닝 목록</a><div class="thead"><div><h1 class="tt">${esc(O.name)}</h1><div class="sub">${O.color==='w'?'백':'흑'}으로 · ${O.n}판 승률 ${O.score}%</div></div><span class="chip ${v[1]}">${v[0]}</span></div>`;
   h+=`<div class="pzmodes">${O.lines.map((l,i)=>`<a class="${i===LI?'on':''}" data-line="${i}" href="train.html?o=${encodeURIComponent(O.id)}&l=${i}">${d[i]&&d[i].clean?'<i class="ck"></i>':''}${esc(l.name)}</a>`).join('')}</div>`;
   return h+`<div class="sub lnote">${esc(line().note)}${line().fix?` · 평소 틀리던 자리 ${line().fix}곳`:''}</div>`;
 }
@@ -129,5 +128,5 @@ document.addEventListener('click',(e)=>{
   if(e.target.closest('#show')){ ST.shown++; ST.arrows=[[p.uci,GREEN]]; ST.sel=null; ST.msg=`<span class="ic">정답</span><b class="mono">${esc(p.san)}</b>${p.bad?` · 평소에는 <span class="mono">${esc(p.bad.san)}</span> 을 뒀습니다 (${p.bad.n}번).`:''} 화살표대로 두세요.`; ST.wrong=Math.max(ST.wrong,1); render(); }
 });
 
-if(O){ document.title=`${O.key} · 오프닝 연습`; reset(); }
+if(O){ document.title=`${O.name} · 오프닝 연습`; reset(); }
 else $('#main').innerHTML=listHTML();

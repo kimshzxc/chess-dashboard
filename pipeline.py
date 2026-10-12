@@ -795,7 +795,6 @@ def compute_stats(games, con=None):
             early = [p for g in gs for p in g["plies"] if p["mine"] and p["move"] <= 15]
             names = Counter(g["eco_name"] for g in gs).most_common(1)[0][0]
             rows.append(dict(moves=key, name=names[:40], n=len(gs), win=cc["W"], draw=cc["D"], loss=cc["L"],
-                             path=opening_path(gs, c), trouble=opening_trouble(gs, con, top=5), mist=opening_mistakes(gs),
                              score=round((cc["W"] + 0.5 * cc["D"]) / len(gs) * 100),
                              early_blunders=sum(1 for p in early if p["loss"] >= 300),
                              early_blunder_rate=round(sum(1 for p in early if p["loss"] >= 300) / max(1, len(early)) * 100, 1),
@@ -949,31 +948,36 @@ def opening_name_ko(eco_name):
     return " ".join((eco_name or "").split()[:3])
 
 
-def _side_key(g, me, k):
-    """한쪽이 둔 처음 k수 (me=True 면 내 수, False 면 상대 수)."""
-    return tuple(p["san"] for p in g["plies"] if bool(p["mine"]) == me)[:k]
+def opening_family(eco_name):
+    """체스닷컴 오프닝 이름 → (묶음 키, 한글 이름). 변화 이름은 버리고 큰 갈래만 본다 (Italian Game 과 Giuoco Piano 는 같은 묶음)."""
+    ko = opening_name_ko(eco_name)
+    en = next((e for e, k in OPENING_KO if k == ko), ko)
+    return re.sub(r"[^a-z0-9]+", "_", en.lower()).strip("_"), ko
 
 
-def _key_label(key, white):
-    return " ".join(f"{i + 1}.{m}" if white else f"{i + 1}…{m}" for i, m in enumerate(key))
+def common_line(gs, max_plies=8, share=0.6):
+    """묶음의 판들이 대부분 함께 지나가는 첫 수순 (예: 1.e4 e5 2.Nf3 Nc6 3.Bc4)."""
+    cur, out = list(gs), []
+    for i in range(max_plies):
+        cnt = Counter(g["plies"][i]["san"] for g in cur if len(g["plies"]) > i)
+        if not cnt:
+            break
+        san, n = cnt.most_common(1)[0]
+        if n < share * len(gs):
+            break
+        out.append((f"{i // 2 + 1}." if i % 2 == 0 else "") + san)
+        cur = [g for g in cur if len(g["plies"]) > i and g["plies"][i]["san"] == san]
+    return " ".join(out)
 
 
-def repertoire_groups(gs, me, white, min_n):
-    """같은 색 게임들을 한쪽의 첫 수들로 묶는다. 백의 수는 3수, 흑의 수는 2수까지 보고,
-    판 수가 min_n 에 못 미치는 갈래는 한 수 짧은 묶음('그 외')으로 합친다."""
-    left, out = list(gs), []
-    for k in range(3 if white else 2, 0, -1):
-        d = defaultdict(list)
-        for g in left:
-            key = _side_key(g, me, k)
-            if len(key) == k:
-                d[key].append(g)
-        for key, v in d.items():
-            if len(v) >= min_n:
-                out.append((key, v, k < (3 if white else 2)))
-        taken = {id(g) for _, v, _ in out for g in v}
-        left = [g for g in left if id(g) not in taken]
-    return out
+def repertoire_groups(gs, min_n):
+    """같은 색 게임들을 오프닝 이름으로 묶는다. [(묶음 키, 한글 이름, 게임들)], 판 수가 min_n 에 못 미치는 묶음은 뺀다."""
+    d, names = defaultdict(list), {}
+    for g in gs:
+        key, ko = opening_family(g["eco_name"])
+        d[key].append(g)
+        names[key] = ko
+    return [(k, names[k], v) for k, v in d.items() if len(v) >= min_n]
 
 
 def _eval_at(g, move):
@@ -992,11 +996,7 @@ def _mean(v):
     return sum(v) / len(v) if v else None
 
 
-def repertoire_id(c, side, key):
-    return f"{c}-{side}-{'_'.join(key)}"
-
-
-def repertoire_row(key, gs, rest, base, con, white, me, other, rid=None):
+def repertoire_row(rid, name, gs, rest, base, con):
     cc = Counter(g["outcome"] for g in gs)
     n = len(gs)
     score = round((cc["W"] + 0.5 * cc["D"]) / n * 100, 1)
@@ -1016,7 +1016,7 @@ def repertoire_row(key, gs, rest, base, con, white, me, other, rid=None):
     dec = [p for p in dec if p and p["wp_loss"] >= MISTAKE_WP]
     recent_l = sorted(losses, key=lambda g: -g["end_time"])[:3]
     return dict(
-        id=rid, key=_key_label(key, white), other=other, name=opening_name_ko(Counter(g["eco_name"] for g in gs).most_common(1)[0][0]),
+        id=rid, name=name, key=common_line(gs),
         n=n, win=cc["W"], draw=cc["D"], loss=cc["L"], score=score, diff=diff, verdict=verdict, ev=ev,
         eval15=round(e15) if e15 is not None else None, clock15=round(c15) if c15 is not None else None,
         acc15=acc([p["wp_loss"] for p in early]),
@@ -1028,30 +1028,26 @@ def repertoire_row(key, gs, rest, base, con, white, me, other, rid=None):
 
 
 def repertoire_stats(games, con=None):
-    """색마다 두 갈래의 오프닝 성적표: mine = 내가 고른 수순(내 첫 수들), opp = 상대가 고른 수순(상대 첫 수들).
-    각 묶음에 승률, 같은 색 나머지 판과의 차이와 검정, 15수 시점 형세·시계, 15수 안 실수 프로필, 반복 실수, 패배의 결정적 실수를 붙인다."""
+    """색마다 오프닝 성적표: 오프닝 이름으로 묶은 판들의 승률, 같은 색 나머지 판과의 차이와 검정,
+    15수 시점 형세·시계, 15수 안 실수 프로필, 반복 실수, 패배의 결정적 실수."""
     out = {}
     min_n = 5 if len(games) >= 60 else 3
     for c in "wb":
         gs = [g for g in games if g["my_color"] == c]
         if not gs:
-            out[c] = dict(base=None, mine=[], opp=[])
+            out[c] = dict(base=None, rows=[])
             continue
         base = dict(n=len(gs), score=_score([g["outcome"] for g in gs]),
                     eval15=(lambda v: round(v) if v is not None else None)(_mean([_eval_at(g, EARLY_MOVES) for g in gs])),
                     clock15=(lambda v: round(v) if v is not None else None)(_mean([_clock_at(g, EARLY_MOVES) for g in gs])),
                     acc15=acc([p["wp_loss"] for g in gs for p in g["plies"] if p["mine"] and p["move"] <= EARLY_MOVES]),
                     mist_pg=round(sum(1 for g in gs for p in g["plies"] if p.get("cat") and p["move"] <= EARLY_MOVES) / len(gs), 2))
-        out[c] = dict(base=base)
-        for side, me in (("mine", True), ("opp", False)):
-            white = (c == "w") == me                      # 이 갈래의 수를 두는 쪽이 백인가
-            rows = []
-            for key, v, other in repertoire_groups(gs, me, white, min_n):
-                ids = {id(g) for g in v}
-                rows.append(repertoire_row(key, v, [g for g in gs if id(g) not in ids], base, con, white, me, other,
-                                           repertoire_id(c, side, key)))
-            rows.sort(key=lambda r: -r["n"])
-            out[c][side] = rows
+        rows = []
+        for key, name, v in repertoire_groups(gs, min_n):
+            ids = {id(g) for g in v}
+            rows.append(repertoire_row(f"{c}-{key}", name, v, [g for g in gs if id(g) not in ids], base, con))
+        rows.sort(key=lambda r: -r["n"])
+        out[c] = dict(base=base, rows=rows)
     return out
 
 
@@ -1095,18 +1091,16 @@ def _position_index(gs):
     return idx
 
 
-def book_line(con, eng, budget, c, key, key_mine, grp_idx, all_idx, alt=None):
+def book_line(con, eng, budget, c, grp_idx, all_idx, alt=None):
     """라인 하나. alt=(수 순번, san) 이면 그 자리에서 상대가 그 수를 두는 갈래.
     (수 목록, 메인라인에서 갈라질 수 있는 상대 수 [(횟수, 순번, san)], 끝까지 만들어졌는가) 를 돌려준다."""
     b = chess.Board()
     out, branches, my_n, reply, complete = [], [], 0, None, True
     while my_n < EARLY_MOVES and not b.is_game_over():
         mine = (b.turn == chess.WHITE) == (c == "w")
-        fen, i, kidx = b.fen(), len(out), b.fullmove_number - 1
+        fen, i = b.fen(), len(out)
         node = dict(mine=int(mine))
-        if mine == key_mine and kidx < len(key):
-            san = key[kidx]                                   # 이 오프닝을 정의하는 수
-        elif not mine:
+        if not mine:
             cands = [(s, n) for s, n in grp_idx[fen]["opp"].most_common() if n >= 2] if fen in grp_idx else []
             if alt and alt[0] == i:
                 san = alt[1]
@@ -1164,13 +1158,10 @@ def book_targets(games):
     out = []
     for c in "wb":
         gs = [g for g in games if g["my_color"] == c]
-        for side, me in (("mine", True), ("opp", False)):
-            white = (c == "w") == me
-            groups = {repertoire_id(c, side, key): (key, v) for key, v, other in repertoire_groups(gs, me, white, min_n) if not other}
-            for r in rep[c][side]:
-                if r["id"] in groups and (r["n"] >= BOOK_MIN_N or r["verdict"].startswith("weak")):
-                    key, v = groups[r["id"]]
-                    out.append(dict(row=r, c=c, side=side, me=me, key=key, gs=v, all=gs))
+        groups = {f"{c}-{key}": v for key, _, v in repertoire_groups(gs, min_n)}
+        for r in rep[c]["rows"]:
+            if r["n"] >= BOOK_MIN_N or r["verdict"].startswith("weak"):
+                out.append(dict(row=r, c=c, gs=groups[r["id"]], all=gs))
     out.sort(key=lambda t: (not t["row"]["verdict"].startswith("weak"), -t["row"]["n"]))
     return out
 
@@ -1185,7 +1176,7 @@ def build_book(con, games, eng=None, limit=0):
         if c not in idx_cache:
             idx_cache[c] = _position_index(t["all"])
         grp_idx = _position_index(t["gs"])
-        args = (con, eng, budget, c, t["key"], t["me"], grp_idx, idx_cache[c])
+        args = (con, eng, budget, c, grp_idx, idx_cache[c])
         main, branches, ok = book_line(*args)
         lines = [dict(name="메인라인", note="내 게임에서 상대가 가장 자주 둔 수로 진행", plies=main)]
         seen = set()
@@ -1209,7 +1200,7 @@ def build_book(con, games, eng=None, limit=0):
             last = next((p for p in reversed(ln["plies"]) if p.get("cp") is not None), None)
             ln["cp"] = last["cp"] if last else None
             ln["fix"] = sum(1 for p in ln["plies"] if p.get("bad"))
-        book[r["id"]] = dict(id=r["id"], key=r["key"], color=c, side=t["side"], name=r["name"], n=r["n"], score=r["score"],
+        book[r["id"]] = dict(id=r["id"], key=r["key"], color=c, name=r["name"], n=r["n"], score=r["score"],
                              verdict=r["verdict"], lines=lines)
     con.commit()
     return book, limit - budget[0], pending
@@ -1241,49 +1232,6 @@ def opening_mistakes(gs):
     return dict(n=len(ms), per_game=round(len(ms) / len(gs), 2), clean=len(gs) - len(first), first_slip=median(first),
                 by_move=[sum(1 for p in ms if p["move"] == m) for m in range(1, EARLY_MOVES + 1)],
                 cats=[dict(key=k, n=v, cost=round(sum(p["wp_loss"] for p in ms if p["cat"] == k))) for k, v in cnt.most_common()])
-
-
-def opening_path(gs, my_color, start=4, max_plies=16, min_n=3):
-    """같은 첫 4수를 둔 게임들에서 가장 흔한 진행을 따라가며 수마다 통계를 붙인다."""
-    path = []
-    fen0 = gs[0]["plies"][start - 1]["fen"] if len(gs[0]["plies"]) >= start else None
-    # 시작 국면(4수 뒤)
-    b = chess.Board()
-    for p in gs[0]["plies"][:start]:
-        b.push_san(p["san"])
-    path.append(dict(san=None, fen=b.fen(), n=len(gs), score=None, mine=None))
-    cur = gs
-    for k in range(start, max_plies):
-        cands = Counter(g["plies"][k]["san"] for g in cur if len(g["plies"]) > k)
-        if not cands:
-            break
-        san, n = cands.most_common(1)[0]
-        if n < min_n:
-            break
-        nxt = [g for g in cur if len(g["plies"]) > k and g["plies"][k]["san"] == san]
-        ply = nxt[0]["plies"][k]
-        mine = bool(ply["mine"])
-        cc = Counter(g["outcome"] for g in nxt)
-        step = dict(san=san, uci=ply["uci"] if ply.get("uci") else uci_of(ply["fen"], san), n=n,
-                    score=round((cc["W"] + 0.5 * cc["D"]) / n * 100), mine=mine, move=ply["move"], mover=ply["mover"])
-        b2 = chess.Board(ply["fen"])
-        b2.push_san(san)
-        step["fen"] = b2.fen()
-        if mine:
-            losses = [g["plies"][k]["loss"] for g in nxt]
-            step["avg_loss"] = round(sum(losses) / len(losses))
-            bests = Counter(g["plies"][k]["best"] for g in nxt if g["plies"][k]["best"])
-            if bests:
-                bsan = bests.most_common(1)[0][0]
-                step["best"] = bsan
-                step["best_uci"] = uci_of(ply["fen"], bsan)
-            step["problem"] = bool(step["avg_loss"] >= 40 and step.get("best") and step["best"] != san)
-            # 이 국면에서 내가 둔 다른 수들 (대안)
-            alts = Counter(g["plies"][k]["san"] for g in cur if len(g["plies"]) > k)
-            step["alts"] = [dict(san=a, n=c) for a, c in alts.most_common(4) if a != san]
-        path.append(step)
-        cur = nxt
-    return path
 
 
 def opening_trouble(gs, con, max_move=15, top=3):
@@ -1982,9 +1930,8 @@ def render_all(con, cfg):
         for c in (S or {}).get("coach", {}).get("cats", []):
             c["puzzles"] = pz.get(c["key"], 0)        # 이 유형으로 풀 수 있는 퍼즐 수 (기간과 무관)
         for c in "wb":
-            for side in ("mine", "opp"):
-                for r in ((S or {}).get("repertoire", {}).get(c) or {}).get(side, []):
-                    r["book"] = len(book[r["id"]]["lines"]) if r["id"] in book else 0     # 연습 라인 수
+            for r in ((S or {}).get("repertoire", {}).get(c) or {}).get("rows", []):
+                r["book"] = len(book[r["id"]]["lines"]) if r["id"] in book else 0         # 연습 라인 수
     json.dump(dict(generated=payload["generated"], depth=BOOK_DEPTH, moves=EARLY_MOVES, openings=book),
               open(os.path.join(DOCS, "book.json"), "w"), ensure_ascii=False, separators=(",", ":"))
     json.dump(payload, open(os.path.join(DOCS, "stats.json"), "w"), ensure_ascii=False)
