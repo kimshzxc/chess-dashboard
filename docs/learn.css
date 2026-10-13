@@ -1,0 +1,58 @@
+/* ---------- 교본 ---------- */
+header{position:static;border-bottom:0;padding:calc(14px + env(safe-area-inset-top,0px)) 0 0;background:none;backdrop-filter:none;-webkit-backdrop-filter:none}
+.backl{display:inline-block;margin-top:14px;font-size:14px;font-weight:600}
+.lsum{margin-top:14px}
+.lsum .n{font-size:17px;font-weight:700}
+.pbar{height:6px;border-radius:3px;background:var(--surface2);overflow:hidden;margin-top:10px}
+.pbar i{display:block;height:100%;background:var(--s1);border-radius:3px}
+.lpart{margin:22px 0 8px}
+.lpart h2{margin:0;font-size:17px}
+.lpart .sub{margin-top:2px}
+.lrow{display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--line);color:inherit}
+.lrow:last-child{border-bottom:0}
+.lrow .no{flex:none;width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12.5px;font-weight:700;background:var(--surface2);color:var(--text2)}
+.lrow.done .no{background:color-mix(in srgb,var(--good) 22%,transparent);color:var(--good)}
+.lrow .bd{flex:1;min-width:0}
+.lrow .tt{font-size:15px;font-weight:600}
+.lrow .nm{color:var(--text2);font-size:12.5px;margin-top:2px;line-height:1.4}
+.lrow .chip{flex:none}
+.lrow .mn{flex:none;color:var(--muted);font-size:12.5px}
+/* 본문 */
+.lesson{max-width:640px;margin:0 auto}
+.lesson .eyebrow{font-size:12.5px;font-weight:700;color:var(--me-ink);margin-top:10px}
+.lesson h1{font-size:24px;line-height:1.25;margin:4px 0 4px;letter-spacing:-.02em}
+.lesson h2{font-size:18px;margin:30px 0 0;letter-spacing:-.01em}
+.lesson p{font-size:16px;line-height:1.72;margin:12px 0 0}
+.lesson ul{margin:12px 0 0;padding-left:20px}
+.lesson li{font-size:15.5px;line-height:1.65;margin-top:6px}
+.lesson .mv{font-weight:600;white-space:nowrap}
+.lesson .rule{margin-top:16px;font-size:15px;line-height:1.6}
+.myrec{margin-top:14px;padding:4px 14px}
+.myrec a{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line);color:inherit;font-size:14px}
+.myrec a:last-child{border-bottom:0}
+.myrec .go{color:var(--me-ink);font-weight:600;white-space:nowrap}
+.fig{margin:16px 0 0;padding:14px;border-radius:var(--r);background:var(--surface);border:1px solid var(--line)}
+.fig .figq{font-size:15px;line-height:1.6;margin-bottom:12px}
+.fig .board,.fig .viewer{max-width:420px;margin-left:auto;margin-right:auto;display:block}
+.fig .viewer{margin-top:0}
+.fig .figc{font-size:14.5px;line-height:1.62;color:var(--text2);margin-top:12px}
+.fig .cap{text-align:left;min-height:68px;font-size:14.5px;line-height:1.55;color:var(--text);max-width:420px;margin:10px auto 0}
+.fig .cap b{margin-right:4px}
+.fig .tag{display:inline-block;font-size:11.5px;font-weight:700;padding:3px 8px;border-radius:999px;background:var(--me-soft);color:var(--me-ink);margin-bottom:8px}
+.tryb{border-radius:10px;max-width:420px;margin:0 auto}
+.tryb .board{cursor:pointer}
+.tryb.ng{animation:shake .35s ease}
+@keyframes shake{0%,100%{transform:none}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
+.trym{font-size:14.5px;line-height:1.6;margin-top:12px;min-height:24px}
+.trym .ic{display:inline-block;font-size:11.5px;font-weight:700;padding:3px 8px;border-radius:999px;background:var(--surface2);color:var(--text2);margin-right:6px;vertical-align:1px}
+.trym.ok .ic{background:color-mix(in srgb,var(--good) 20%,transparent);color:var(--good)}
+.trym.ng .ic{background:color-mix(in srgb,var(--critical) 20%,transparent);color:var(--critical)}
+.trya{display:flex;gap:8px;margin-top:10px}
+.trya .btn{min-height:40px;font-size:14px;padding:0 14px}
+.lend{margin-top:30px;padding-top:18px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:10px}
+.lend .btn{width:100%;min-height:48px}
+.lend .row2{display:flex;gap:10px}
+.lend .row2 .btn{flex:1;min-width:0;font-size:14px}
+.lesson .rule>span.mv{display:inline;font-size:inherit;color:inherit;letter-spacing:0;margin:0}
+.lend .row2{flex-direction:column}
+.lend .row2 .btn{flex:none}

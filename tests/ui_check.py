@@ -590,6 +590,39 @@ def run(c, base, server, shots):
             check("오프닝 코칭 시트에 연습 링크", (c.ev("document.querySelector('#sheet .trainlink')?.getAttribute('href')") or "").endswith(urllib.request.quote(rid, safe="")), c.ev("document.querySelector('#sheet .trainlink')?.getAttribute('href')"))
             c.tap("#sheet-x", None)
 
+    # ------------------------------------------------------------ 교본
+    print("== 교본")
+    les = fetch_json("lessons.json"); chs = les["chapters"]
+    c.go(base + "learn.html" + q(), "document.querySelectorAll('.lrow').length>0"); c.ev("localStorage.removeItem('learn-done')")
+    check("교본 목차", c.go(base + "learn.html" + q(), "document.querySelectorAll('.lrow').length>0") and c.ev("document.querySelectorAll('.lpart+.card:not(#lrec) .lrow').length") == len(chs), len(chs))
+    check("연습 내비게이션에 교본", c.ev("document.querySelector('#pnav a.on')?.getAttribute('href')") == "learn.html" and c.ev("document.querySelectorAll('#pnav a').length") == 3)
+    o = c.ev(OVER); check("가로 넘침 없음 (교본 목차)", o[0] <= o[1], o)
+    snap("learn_list")
+    LREADY = "!!document.querySelector('.lesson h1') && !document.querySelector('.viewer:empty')"
+    ch = next(x for x in chs if x["id"] == "mates"); tries = [b for b in ch["blocks"] if b["t"] == "try"]
+    check("장이 열린다", c.go(base + "learn.html?c=mates" + q("?"), LREADY) and c.ev("document.querySelector('.lesson h1').textContent") == ch["title"])
+    check("그림·수순·문제가 모두 그려진다", c.ev("document.querySelectorAll('.fig svg.board').length") == sum(b["t"] in ("board", "line", "try") for b in ch["blocks"]))
+    o = c.ev(OVER); check("가로 넘침 없음 (교본 본문)", o[0] <= o[1], o)
+    c.ev("document.querySelector('.viewer [data-go=\"1\"]').click()")
+    check("수순을 한 수씩 넘긴다", c.ev("document.querySelector('.viewer .moves .cur')?.textContent") == next(b for b in ch["blocks"] if b["t"] == "line")["lines"][0]["plies"][0]["san"])
+    t = tries[0]; SQ = """((sq)=>{const r=document.querySelector('#try0 svg.board').getBoundingClientRect(),f='abcdefgh'.indexOf(sq[0]),k=8-(+sq[1]);return [r.left+(f+.5)*r.width/8,r.top+(k+.5)*r.height/8]})"""
+    def press(sq):
+        x, y = c.ev(f"{SQ}('{sq}')"); c.ev(f"document.querySelector('#try0 svg.board').dispatchEvent(new PointerEvent('pointerdown',{{clientX:{x},clientY:{y},bubbles:true}}))")
+    c.ev("document.querySelector('#try0').scrollIntoView({block:'center'})"); c.pump(0.3)
+    wrong = next(m for m in ("g1h1", "g1f1") if m != t["uci"]); press(wrong[:2]); press(wrong[2:])
+    check("틀린 수는 다시 찾게 한다", c.ev("document.querySelector('#try0 .trym').classList.contains('ng')"))
+    press(t["uci"][:2]); press(t["uci"][2:4])
+    check("정답을 두면 해설이 나온다", c.ev("document.querySelector('#try0 .trym').classList.contains('ok')") and t["san"] in c.ev("document.querySelector('#try0 .trym').textContent"))
+    snap("learn_chapter")
+    c.ev("document.querySelector('#ldone').click()"); nxt = chs[chs.index(ch) + 1]["id"]
+    check("읽음 표시 뒤 다음 장으로", c.wait(f"location.search.includes('c={nxt}') && !!document.querySelector('.lesson h1')", 6) and "mates" in (c.ev(LS("learn-done")) or {}))
+    check("유형 주소로 관련 장이 열린다", c.go(base + "learn.html?cat=missed_capture" + q("?"), LREADY) and c.ev("document.querySelector('.lesson h1').textContent") == next(x for x in chs if x["cats"][:1] == ["missed_capture"])["title"])
+    if book:
+        rid = next((r for x in chs for r in x["rep"] if r in book), None)
+        if rid:
+            check("오프닝 주소로 장이 열리고 내 성적이 붙는다", c.go(base + "learn.html?rep=" + urllib.request.quote(rid) + q("?"), LREADY) and c.ev("document.querySelectorAll('.myrec a').length") >= 1)
+    errs = c.errors(); check("교본에서 오류 없음", not errs, errs[:4])
+
     # ------------------------------------------------------------ 설치형 웹앱
     print("== 설치형 웹앱")
     c.go(base + "index.html" + q(), READY)

@@ -50,7 +50,7 @@ function headHTML(){
   const v=VERD[O.verdict]||VERD.even, d=DONE[O.id]||{};
   let h=`<a class="backl" href="train.html">‹ 오프닝 목록</a><div class="thead"><div><h1 class="tt">${esc(O.name)}</h1><div class="sub">${O.color==='w'?'백':'흑'}으로 · ${O.n}판 승률 ${O.score}%</div></div><span class="chip ${v[1]}">${v[0]}</span></div>`;
   h+=`<div class="pzmodes">${O.lines.map((l,i)=>`<a class="${i===LI?'on':''}" data-line="${i}" href="train.html?o=${encodeURIComponent(O.id)}&l=${i}">${d[i]&&d[i].clean?'<i class="ck"></i>':''}${esc(l.name)}</a>`).join('')}</div>`;
-  return h+`<div class="sub lnote">${esc(line().note)}${line().fix?` · 평소 틀리던 자리 ${line().fix}곳`:''}</div>`;
+  return h+`<div class="sub lnote">${esc(line().note)}${line().fix?` · 평소 틀리던 자리 ${line().fix}곳`:''} · <a class="learnlink" href="learn.html?rep=${encodeURIComponent(O.id)}">정석 읽기 ›</a></div>`;
 }
 function movesHTML(){
   const P=line().plies; let h='<div class="tmoves">';

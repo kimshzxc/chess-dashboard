@@ -237,6 +237,35 @@ class WithDb(unittest.TestCase):
         self.con.execute("INSERT INTO lines VALUES(?,?,?,?)", (START, "e4", "d4", json.dumps(LINE)))
         self.assertEqual(pipeline.cached_lines(self.con, START, "e4", "d4")["best_line"][0]["san"], "d4")
 
+    def test_lessons_build(self):
+        """교본 원고의 수순이 전부 둘 수 있고, 유형·오프닝 키가 실제 키이며, 올라간 lessons.json 이 원고와 같다."""
+        import re
+        import chess
+        ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        sys.path.insert(0, os.path.join(ROOT, "lessons"))
+        import build
+        data = build.build()
+        ids = [c["id"] for c in data["chapters"]]
+        self.assertEqual(len(ids), len(set(ids)))
+        parts = {p["id"] for p in data["parts"]}
+        for c in data["chapters"]:
+            self.assertIn(c["part"], parts)
+            self.assertTrue(set(c["cats"]) <= set(pipeline.CAT_KEYS), c["id"])
+            self.assertTrue(all(re.match(r"^[wb]-[a-z_]+$", r) for r in c["rep"]), c["id"])
+            for b in c["blocks"]:
+                if b["t"] == "try":
+                    bd = chess.Board(b["fen"]); bd.push_uci(b["uci"])
+                    self.assertEqual(bd.fen(), b["after"])
+                    self.assertEqual(b["mate"], bd.is_checkmate())
+                if b["t"] == "line":
+                    for ln in b["lines"]:
+                        bd = chess.Board(ln["fen"])
+                        for p in ln["plies"]:
+                            bd.push_uci(p["uci"])
+                            self.assertEqual(bd.fen(), p["fen"])
+        with open(os.path.join(ROOT, "docs", "lessons.json"), encoding="utf-8") as f:
+            self.assertEqual(json.load(f), json.loads(json.dumps(data)), "lessons/build.py 를 다시 실행하세요")
+
     def test_reanalysis_queue(self):
         self.con.execute("UPDATE games SET depth=14 WHERE url LIKE '%1000'")
         redo = self.con.execute("SELECT COUNT(*) FROM games WHERE analyzed=1 AND (depth IS NULL OR depth!=?)", (pipeline.DEPTH,)).fetchone()[0]

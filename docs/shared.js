@@ -82,7 +82,7 @@ function tabbar(){
 document.body.insertAdjacentHTML('beforeend',tabbar());
 { const tb=document.getElementById('tbtn'); if(tb){ tb.innerHTML=icon('sliders'); tb.setAttribute('aria-label','테마'); tb.setAttribute('role','button'); tb.title='테마'; } }
 /* 연습 탭 머리: 퍼즐 / 오프닝 연습 전환 (puzzle.html, train.html 공용) */
-const practiceNav=(cur)=>`<div class="tabs seg"><a class="${cur==='puzzle'?'on':''}" href="puzzle.html">퍼즐</a><a class="${cur==='train'?'on':''}" href="train.html">오프닝 연습</a></div>`;
+const practiceNav=(cur)=>`<div class="tabs seg"><a class="${cur==='puzzle'?'on':''}" href="puzzle.html">퍼즐</a><a class="${cur==='train'?'on':''}" href="train.html">오프닝</a><a class="${cur==='learn'?'on':''}" href="learn.html">교본</a></div>`;
 function themePanel(){
   let h=`<div class="tpanel" id="tpanel"><div class="lab">화면</div><div class="row"><span class="sw mode" data-mode="dark">짙게</span><span class="sw mode" data-mode="light">밝게</span></div><div class="lab">판 색상</div><div class="row">`;
   for(const [k,b] of Object.entries(BOARDS)) h+=`<span class="sw" data-board="${k}"><i><b style="background:${b.l}"></b><b style="background:${b.d}"></b><b style="background:${b.d}"></b><b style="background:${b.l}"></b></i>${b.name}</span>`;

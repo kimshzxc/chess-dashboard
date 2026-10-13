@@ -191,7 +191,7 @@ function catBody(c){
   const dg=catDiag(c);
   h+=`<ul class="diag">${dg.map(t=>`<li>${t}</li>`).join('')}<li>국면: 오프닝 ${ph.opening||0} · 중반 ${ph.middlegame||0} · 엔드게임 ${ph.endgame||0} · ${c.games}판(전체의 ${c.game_rate}%)에서 나옴</li></ul>`;
   h+=`<div class="rule"><span>두기 전에</span>${esc(m.rule)}</div>`;
-  h+=`<div class="links cact"><span class="btn" data-cattrend="${c.key}">추이 분석</span>${c.puzzles?`<a class="btn on" href="puzzle.html?cat=${c.key}">이 유형 퍼즐 ${c.puzzles}개 ›</a>`:''}</div>`;
+  h+=`<div class="links cact"><span class="btn" data-cattrend="${c.key}">추이 분석</span><a class="btn" href="learn.html?cat=${c.key}">교본</a>${c.puzzles?`<a class="btn on" href="puzzle.html?cat=${c.key}">이 유형 퍼즐 ${c.puzzles}개 ›</a>`:''}</div>`;
   h+=`<h3>최근 사례</h3>`;
   (c.examples||[]).forEach((w,i)=>{ h+= i===0 ? blunderCard(w) : blunderRow(w,`cx${c.key}${i}`); });
   return h;
