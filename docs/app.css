@@ -124,6 +124,10 @@ td.n,th.n{text-align:right;white-space:nowrap}
 .cgroup b{font-size:14px;color:var(--text)}
 h2+.cgroup{margin-top:2px}
 .cat{padding:0;overflow:hidden}
+.cat:not(.open) .cath{padding:11px 16px 12px}
+.cat:not(.open) .cath .sub{display:none}
+.cat:not(.open) .cbar{height:4px;margin:8px 0 0}
+.cat:not(.open) .cath .ct b{font-size:15px}
 .cath{padding:14px 16px;cursor:pointer;-webkit-tap-highlight-color:transparent}
 .cath .ct{display:flex;align-items:center;gap:8px}
 .cath .ct b{font-size:15.5px;min-width:0}
@@ -197,8 +201,8 @@ h2 small{max-width:46ch}
 .routine{display:flex;align-items:center;gap:6px;margin-top:10px;padding:8px 8px 8px 14px;border:1px solid var(--line);border-radius:var(--r);background:var(--surface);box-shadow:var(--shadow-sm)}
 .routine .k{flex:none;font-size:12.5px;font-weight:700;color:var(--text2);margin-right:4px}
 .routine a{flex:1;min-width:0;display:flex;align-items:center;justify-content:center;gap:6px;min-height:38px;padding:0 6px;border-radius:10px;background:var(--surface2);color:var(--text);font-size:13px;font-weight:600;white-space:nowrap}
-.routine a i{flex:none;width:15px;height:15px;border-radius:50%;border:1.5px solid var(--line2);font-style:normal;font-size:10px;line-height:13px;text-align:center;color:#fff}
+.routine a i{flex:none;width:15px;height:15px;border-radius:50%;border:1.5px solid var(--text2);opacity:.75;font-style:normal;font-size:10px;line-height:13px;text-align:center;color:#fff}
 .routine a.done{color:var(--text2)}
-.routine a.done i{background:var(--good);border-color:var(--good)}
+.routine a.done i{background:var(--good);border-color:var(--good);opacity:1}
 .routine a{font-size:12.5px;gap:5px;padding:0 4px}
 .routine a i{width:13px;height:13px;font-size:9px;line-height:11px}

@@ -326,11 +326,12 @@ def run(c, base, server, shots):
             R = S.get("repertoire") or {}
             nrows = sum(len(R[cc]["rows"]) for cc in "wb" if R.get(cc) and R[cc].get("base"))
             if nrows:
-                check("오프닝 성적표: 묶음 수가 데이터와 같다", c.ev("document.querySelectorAll('#s-rep .oprow').length") >= nrows, nrows)
-                r0 = R["w"]["rows"][0]
-                check("오프닝 성적표: 첫 줄의 승률", f"{r0['score']}%" == c.ev("document.querySelector('#s-rep [data-repc] .oprow[data-rep=\"w|0\"] .os b').textContent"), r0["name"])
+                check("오프닝 성적표: 요약과 나머지 목록을 합치면 데이터와 같다", c.ev("document.querySelectorAll('#s-rep .oprow').length") == nrows, nrows)
+                rep0 = c.ev("document.querySelector('#s-rep [data-repc=\"w\"] .oprow')?.dataset.rep") or "w|0"
+                r0 = R["w"]["rows"][int(rep0.split("|")[1])]
+                check("오프닝 성적표: 나머지 목록 첫 줄의 승률", float(r0["score"]) == float(c.ev(f"document.querySelector('#s-rep [data-repc] .oprow[data-rep=\"{rep0}\"] .os b').textContent").rstrip("%")), r0["name"])
                 snap("rep")
-                c.tap('#s-rep .repcard:not(#rep-sum) .oprow[data-rep="w|0"]'); ok = c.wait("document.querySelector('#sheet').classList.contains('open') && document.querySelectorAll('#sheet .diag li').length>0", 3)
+                c.tap(f'#s-rep .oprow[data-rep="{rep0}"]'); ok = c.wait("document.querySelector('#sheet').classList.contains('open') && document.querySelectorAll('#sheet .diag li').length>0", 3)
                 check("오프닝을 누르면 코칭 시트: 판정·진단·할 일", ok and r0["name"] in c.ev("document.querySelector('#sheet-title').textContent") and c.ev("!!document.querySelector('#sheet .verdict')")
                       and c.ev("document.querySelectorAll('#sheet .tiles3 .tile').length") == 3, c.ev("document.querySelector('#sheet .verdict')?.innerText.slice(0,60)"))
                 o = c.ev("[document.querySelector('#sheet-body').scrollWidth, document.querySelector('#sheet-body').clientWidth]"); check("가로 넘침 없음 (오프닝 코칭)", o[0] <= o[1], o)
@@ -592,7 +593,7 @@ def run(c, base, server, shots):
         rid, rep_id = next(((r["id"], f"{cc}|{i}") for cc in "w" for i, r in enumerate((S.get("repertoire", {}).get(cc) or {}).get("rows", [])) if r.get("book")), (None, None))
         if rid:
             c.go(base + "index.html" + q() + "#stats", READY); c.pump(0.6)
-            c.tap(f'#s-rep .repcard:not(#rep-sum) .oprow[data-rep="{rep_id}"]'); c.wait("document.querySelector('#sheet').classList.contains('open')", 4)
+            c.tap(f'#s-rep .oprow[data-rep="{rep_id}"]'); c.wait("document.querySelector('#sheet').classList.contains('open')", 4)
             check("오프닝 코칭 시트에 연습 링크", (c.ev("document.querySelector('#sheet .trainlink')?.getAttribute('href')") or "").endswith(urllib.request.quote(rid, safe="")), c.ev("document.querySelector('#sheet .trainlink')?.getAttribute('href')"))
             c.tap("#sheet-x", None)
 

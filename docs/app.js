@@ -146,7 +146,7 @@ document.addEventListener('keydown',(e)=>{ if(e.key==='Escape') closeSheet(); })
 const coachOf=(S)=>(S&&S.coach)||{cats:[],focus:[],n:0,games:0};
 const catData=(S,k)=>coachOf(S).cats.find(c=>c.key===k);
 const TREND={better:['줄어드는 중','good'],maybe_better:['줄어드는 조짐','good'],flat:['변화 없음',''],maybe_worse:['늘어나는 조짐','serious'],worse:['늘어나는 중','critical'],insufficient:['판 수 부족','']};
-const trendChip=(t)=>{ const m=TREND[t&&t.status]||TREND.insufficient; return `<span class="chip ${m[1]}">${m[0]}</span>`; };
+const trendChip=(t)=>{ const s=t&&t.status; if(!s||s==='flat'||s==='insufficient') return ''; const m=TREND[s]; return `<span class="chip ${m[1]}">${m[0]}</span>`; };   // 변화가 있을 때만 보인다
 /* 최근 판(왼쪽이 오래된 판)마다 이 유형이 나왔는지 */
 const seqDots=(r)=>`<span class="seq" role="img" aria-label="최근 ${r.k}판 중 ${r.games}판에서 발생">${r.seq.map(v=>`<i class="${v?'hit':''}"></i>`).join('')}</span>`;
 const recentLine=(c,chip=true)=>`<div class="fline">${seqDots(c.recent)}<span>최근 ${c.recent.k}판 중 <b>${c.recent.games}판</b>에서 나옴</span>${chip?trendChip(c.trend):''}</div>`;
@@ -271,12 +271,14 @@ function repSection(S){
   const R=S.repertoire; if(!R) return '';
   let h=`<section id="s-rep" data-view="stats" data-sub="open"><h2>오프닝 성적<small>같은 색의 내 평균 승률과 비교 · 누르면 코칭과 연습</small></h2>`+repSummary(S);
   h+=`<div class="rephead"><div class="tabs" id="repc">${[['w','백'],['b','흑']].map(([c,n])=>`<button data-c="${c}" class="${c===REPC?'on':''}">${n}으로${R[c]&&R[c].base?` ${R[c].base.score}%`:''}</button>`).join('')}</div><a class="btn" href="train.html">연습 목록</a></div>`;
+  const k=repRanked(S), shown=new Set([...k.weak.slice(0,3),...k.strong.slice(0,3)].map(x=>x.id));   // 위 요약 카드에 이미 나온 오프닝
   for(const c of 'wb'){
     const B=R[c]&&R[c].base; if(!B) continue;
     h+=`<div class="card repcard" data-repc="${c}" ${c===REPC?'':'hidden'}>`;
-    const rows=R[c].rows||[], N=6, fid=`fold-rep-${c}`;
-    if(!rows.length) h+='<div class="empty">아직 5판 이상 둔 오프닝이 없습니다.</div>';
-    rows.forEach((r,i)=>{ if(i===N) h+=`<div class="fold" id="${fid}" hidden>`; h+=repRow(r,`${c}|${i}`); });
+    const rows=(R[c].rows||[]).map((r,i)=>[r,`${c}|${i}`]).filter(([,id])=>!shown.has(id)), N=6, fid=`fold-rep-${c}`;
+    if(!rows.length) h+=`<div class="empty">${(R[c].rows||[]).length?'위에 나온 오프닝이 전부입니다.':'아직 5판 이상 둔 오프닝이 없습니다.'}</div>`;
+    else h+=`<div class="k">${shown.size?'그 밖의 오프닝':'모든 오프닝'}</div>`;
+    rows.forEach(([r,id],i)=>{ if(i===N) h+=`<div class="fold" id="${fid}" hidden>`; h+=repRow(r,id); });
     if(rows.length>N) h+=`</div><div class="more"><span class="btn" data-fold="${fid}" data-unit="개">나머지 ${rows.length-N}개 보기</span></div>`;
     h+='</div>';
   }
