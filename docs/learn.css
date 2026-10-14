@@ -56,3 +56,5 @@ header{position:static;border-bottom:0;padding:calc(14px + env(safe-area-inset-t
 .lesson .rule>span.mv{display:inline;font-size:inherit;color:inherit;letter-spacing:0;margin:0}
 .lend .row2{flex-direction:column}
 .lend .row2 .btn{flex:none}
+#mine h2{margin-top:34px}
+#mine .figq .sub{margin-top:4px;font-weight:400}

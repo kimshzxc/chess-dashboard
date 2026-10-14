@@ -169,6 +169,17 @@ function lastGameCard(S){
   return `<a class="card lastg" href="${gameLink(g.url)}"><div class="h"><div><div class="k">직전 판 피드백</div><b>${g.date.slice(5)} ${g.color==='w'?'백':'흑'} vs ${esc(g.opp)} · ${res}</b></div><span class="go">복기 ›</span></div>
     <div class="v">${v}</div>${cats.length?`<div class="ctags">${cats.map(([k,n])=>catTag(k,focus.includes(k)?'rep':'').replace('</span>',`${n>1?` ×${n}`:''}</span>`)).join('')}</div>`:''}</a>`;
 }
+/* 홈의 '오늘' 한 줄: 교본 1장 · 오늘의 퍼즐 · 오프닝 1라인. 완료 여부는 각 페이지가 기기에 남긴 기록에서 읽는다 */
+function routineLine(){
+  const ls=(k)=>{ try{ return JSON.parse(localStorage.getItem(k)||'null'); }catch(e){ return null; } };
+  const day=new Date(Date.now()+9*3600*1000).toISOString().slice(0,10);
+  const pd=ls('puzzle-day'), on=pd&&pd.date===day&&Array.isArray(pd.ids), pt=on?pd.daily:10, pn=on?pd.ids.slice(0,pd.daily).filter(id=>(pd.res||{})[id]).length:0;
+  const items=[['교본 1장',Object.values(ls('learn-done')||{}).includes(day),'learn.html?next=1'],
+    [`퍼즐 ${pn}/${pt}`,pt>0&&pn>=pt,'puzzle.html'],
+    ['오프닝 1라인',Object.values(ls('train-done')||{}).some(o=>Object.values(o||{}).some(l=>l&&l.last===day)),'train.html?next=1']];
+  return `<div class="routine" id="routine"><span class="k">오늘</span>${items.map(([n,d,u])=>`<a class="${d?'done':''}" href="${u}"><i>${d?'✓':''}</i>${n}</a>`).join('')}</div>`;
+}
+window.addEventListener('pageshow',()=>{ const el=document.getElementById('routine'); if(el) el.outerHTML=routineLine(); });
 function coachSection(S){
   const co=coachOf(S); if(!co.cats.length) return '';
   const focus=co.focus.map(k=>catData(S,k)).filter(Boolean);
@@ -372,6 +383,7 @@ function render(){
     <div class="tile"><div class="k">정확도</div><div class="v">${o.accuracy}%</div><div class="d">상대 ${o.opp_accuracy}%</div></div>
     <div class="tile"><div class="k">대실수/판</div><div class="v">${o.blunders_pg}</div><div class="d">상대 ${o.opp_blunders_pg}</div></div>
   </div>
+  ${routineLine()}
   </section>`;
   h+=coachSection(S);
   let hw=`<section id="s-weak" data-view="stats" data-sub="weak"><h2>경기 운영 보완점<small>시간·컨디션·마무리에서 뽑은 항목 · 누르면 추이</small></h2>`;

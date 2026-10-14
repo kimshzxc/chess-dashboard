@@ -6,9 +6,17 @@ const BOOK = await fetch('book.json',{cache:'no-cache'}).then(r=>r.ok?r.json():n
 $('#tpanel-slot').innerHTML=themePanel(); applyMode(); $('#pnav').innerHTML=practiceNav('train');
 const Q=new URLSearchParams(location.search);
 const OPS=(BOOK&&BOOK.openings)||{};
-const O=OPS[Q.get('o')];
-const VERD={weak:['취약','critical'],weak_hint:['취약 조짐','serious'],strong:['강점','good'],strong_hint:['강점 조짐','good'],even:['평균 수준','']};
+const rank=o=>o.verdict.startsWith('weak')?0:o.verdict==='even'?1:2;
+/* next: 취약한 오프닝부터, 아직 실수 없이 끝내지 못한 첫 라인 */
+function nextUp(){
+  const D=load('train-done',{});
+  for(const o of Object.values(OPS).sort((a,b)=>rank(a)-rank(b)||b.n-a.n)){ const i=o.lines.findIndex((_,i)=>!((D[o.id]||{})[i]||{}).clean); if(i>=0) return [o,i]; }
+  return null;
+}
 const load=(k,d)=>{ try{ const v=JSON.parse(localStorage.getItem(k)||'null'); return v??d; }catch(e){ return d; } };
+const NX=Q.get('next')?nextUp():null;
+const O=NX?NX[0]:OPS[Q.get('o')];
+const VERD={weak:['취약','critical'],weak_hint:['취약 조짐','serious'],strong:['강점','good'],strong_hint:['강점 조짐','good'],even:['평균 수준','']};
 const save=(k,v)=>{ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} };
 const DONE=load('train-done',{});
 const today=()=>new Date(Date.now()+9*3600*1000).toISOString().slice(0,10);
@@ -19,7 +27,6 @@ const cpTxt=(v)=>v==null?'-':Math.abs(v)>=9000?(v>0?'외통 승':'외통 패'):(
 /* ---------- 목록 (o 가 없거나 모르는 id) ---------- */
 function listHTML(){
   const all=Object.values(OPS); if(!all.length) return '<div class="empty">연습 라인이 아직 만들어지지 않았습니다. 게임이 분석되면 몇 분 안에 생깁니다.</div>';
-  const rank=o=>o.verdict.startsWith('weak')?0:o.verdict==='even'?1:2;
   all.sort((a,b)=>rank(a)-rank(b)||b.n-a.n);
   let h=`<div class="sub" style="margin-top:14px">취약한 오프닝부터 · 내 15수째까지 직접 두어 봅니다</div><div class="card" style="margin-top:10px">`;
   for(const o of all){ const v=VERD[o.verdict]||VERD.even, d=DONE[o.id]||{}, cl=o.lines.filter((_,i)=>d[i]&&d[i].clean).length;
@@ -28,7 +35,7 @@ function listHTML(){
 }
 
 /* ---------- 연습 ---------- */
-let LI=Math.max(0,Math.min(O?O.lines.length-1:0,+(Q.get('l')||0)||0));
+let LI=NX?NX[1]:Math.max(0,Math.min(O?O.lines.length-1:0,+(Q.get('l')||0)||0));
 let ST=null;   // {i: 다음에 둘 수의 순번, wrong: 이 수에서 틀린 횟수, miss: 이 라인에서 틀린 수의 개수, shown: 정답을 본 수, msg, sel, busy, done}
 const line=()=>O.lines[LI];
 const fenAt=(i)=>i>0?line().plies[i-1].fen:START;

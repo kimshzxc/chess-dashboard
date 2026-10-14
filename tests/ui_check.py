@@ -601,7 +601,7 @@ def run(c, base, server, shots):
     LREADY = "!!document.querySelector('.lesson h1') && !document.querySelector('.viewer:empty')"
     ch = next(x for x in chs if x["id"] == "mates"); tries = [b for b in ch["blocks"] if b["t"] == "try"]
     check("장이 열린다", c.go(base + "learn.html?c=mates" + q("?"), LREADY) and c.ev("document.querySelector('.lesson h1').textContent") == ch["title"])
-    check("그림·수순·문제가 모두 그려진다", c.ev("document.querySelectorAll('.fig svg.board').length") == sum(b["t"] in ("board", "line", "try") for b in ch["blocks"]))
+    check("그림·수순·문제가 모두 그려진다", c.ev("document.querySelectorAll('.lesson>.fig svg.board').length") == sum(b["t"] in ("board", "line", "try") for b in ch["blocks"]))
     o = c.ev(OVER); check("가로 넘침 없음 (교본 본문)", o[0] <= o[1], o)
     c.ev("document.querySelector('.viewer [data-go=\"1\"]').click()")
     check("수순을 한 수씩 넘긴다", c.ev("document.querySelector('.viewer .moves .cur')?.textContent") == next(b for b in ch["blocks"] if b["t"] == "line")["lines"][0]["plies"][0]["san"])
@@ -621,6 +621,23 @@ def run(c, base, server, shots):
         rid = next((r for x in chs for r in x["rep"] if r in book), None)
         if rid:
             check("오프닝 주소로 장이 열리고 내 성적이 붙는다", c.go(base + "learn.html?rep=" + urllib.request.quote(rid) + q("?"), LREADY) and c.ev("document.querySelectorAll('.myrec a').length") >= 1)
+    pzs = fetch_json("puzzles.json")
+    if any(p.get("cat") in ("missed_capture", "into_capture", "bad_trade") for p in pzs):
+        check("장 끝에 내 게임의 장면이 붙는다", c.go(base + "learn.html?c=hanging" + q("?"), LREADY) and c.wait("document.querySelectorAll('#mine .fig svg.board').length>0", 6), c.ev("document.querySelector('#mine')?.innerHTML.length"))
+        o = c.ev(OVER); check("가로 넘침 없음 (교본의 내 장면)", o[0] <= o[1], o)
+        snap("learn_mine")
+    if any(o.get("trouble") for o in book.values()):
+        rid = next(o["id"] for o in book.values() if o.get("trouble") and any(o["id"] in x["rep"] for x in chs))
+        check("오프닝 장 끝에 반복한 실수가 붙는다", c.go(base + "learn.html?rep=" + urllib.request.quote(rid) + q("?"), LREADY) and c.wait("document.querySelectorAll('#mine .fig svg.board').length>0", 6), rid)
+    check("next 주소는 먼저 읽을 장을 연다", c.go(base + "learn.html?next=1" + q("?"), LREADY))
+    if book:
+        check("오프닝 next 주소는 연습할 라인을 연다", c.go(base + "train.html?next=1" + q("?"), "!!document.querySelector('#tboard svg.board')"))
+    c.ev("localStorage.setItem('learn-done',JSON.stringify({values:new Date(Date.now()+9*3600*1000).toISOString().slice(0,10)}))")
+    c.go(base + "index.html" + q(), READY)
+    rt = c.ev("[...document.querySelectorAll('#routine a')].map(a=>[a.getAttribute('href'),a.classList.contains('done')])")
+    check("홈의 오늘 한 줄", rt and [r[0] for r in rt] == ["learn.html?next=1", "puzzle.html", "train.html?next=1"] and rt[0][1] is True, rt)
+    o = c.ev(OVER); check("가로 넘침 없음 (홈 오늘 한 줄)", o[0] <= o[1], o)
+    snap("home_routine")
     errs = c.errors(); check("교본에서 오류 없음", not errs, errs[:4])
 
     # ------------------------------------------------------------ 설치형 웹앱

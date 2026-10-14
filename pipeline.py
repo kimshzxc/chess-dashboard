@@ -296,18 +296,57 @@ def _creates_threat(after, reply):
     return False
 
 
+def see(b, mv):
+    """잡는 수 mv 의 정적 교환 평가: 그 칸에서 서로 가장 이득인 순서로 주고받았을 때 mv 를 둔 쪽이 얻는 값 (폰 단위).
+    되잡을지 말지는 각자 고른다. 핀에 걸린 기물은 둘 수 있는 수만 세므로 자동으로 빠진다."""
+    to = mv.to_square
+    victim = b.piece_type_at(to)
+    gain = PIECE_VAL[victim] if victim else (1 if b.is_en_passant(mv) else 0)
+    if mv.promotion:
+        gain += PIECE_VAL[mv.promotion] - 1
+    c = b.copy()
+    c.push(mv)
+    back = [see(c, m) for m in c.legal_moves if m.to_square == to and c.is_capture(m)]
+    return gain - max(0, max(back, default=0))
+
+
+def _material(b, color):
+    """color 기준 기물 차이 (센티폰)."""
+    return 100 * sum(PIECE_VAL[q.piece_type] * (1 if q.color == color else -1) for q in b.piece_map().values())
+
+
+def _threat_before(b, to, best=None):
+    """내가 두기 전, 상대가 to 칸의 내 기물을 잡으면 이득이었나 (이미 걸려 있었나). 차례만 넘긴 판에서 본다.
+    체크를 받는 중이면 차례를 넘길 수 없으므로 최선 수를 둔 뒤에도 잡히는지로 본다."""
+    nb = b.copy(stack=False)
+    if b.is_check():
+        if best is None:
+            return bool(b.attackers(not b.turn, to))
+        nb.push(best)
+    else:
+        nb.turn = not nb.turn
+        nb.ep_square = None
+    return any(see(nb, m) > 0 for m in nb.legal_moves if m.to_square == to and nb.is_capture(m))
+
+
+OPPORTUNITY_CP = 150   # 최선 수의 평가가 지금 기물 수보다 이만큼 높아야 '얻을 것이 있었다'고 본다
+
+
 def mistake_cat(p, nxt):
     """실수 하나의 유형 키. p = 내 수, nxt = 바로 다음 수(상대) 레코드 또는 None. 위에서부터 먼저 맞는 것 하나.
       missed_mate     강제 외통이 있었는데 놓침
       allowed_mate    이 수로 강제 외통을 허용
-      into_capture    잡히는 칸으로 기물을 옮김
-      ignored_threat  이미 공격받던 기물을 그대로 둠
-      unguard         지키던 기물을 떼거나 길을 열어 다른 기물이 잡힘
-      bad_trade       손해 보는 잡기·교환
-      missed_capture  잡는 수가 최선이었는데 안 잡음
-      missed_tactic   체크로 시작하는 수가 최선이었는데 놓침
-      allowed_tactic  상대의 다음 한 수(체크·잡기·새 위협)를 못 봄
-      opening / middlegame / endgame   위에 해당하지 않는 조용한 실수 (국면별)"""
+      into_capture    잡히는 칸으로 기물을 옮김 (그 칸의 교환이 실제로 손해)
+      ignored_threat  두기 전부터 잡으면 이득이던 기물을 그대로 둠
+      unguard         이 수 때문에 다른 기물이 잡히게 됨 (지키던 기물을 떼거나 길을 엶)
+      bad_trade       내가 잡았는데 그 칸의 교환이 손해
+      missed_capture  이득인 잡는 수(되잡기 포함)가 최선이었는데 안 잡음
+      missed_tactic   체크로 시작하는 수로 얻을 것이 있었는데 놓침
+      allowed_tactic  상대의 다음 한 수(체크·잡기·새 위협, 또는 곧 기물 하나 값을 얻는 조용한 수)를 못 봄
+      opening / middlegame / endgame   위에 해당하지 않는 조용한 실수 (국면별)
+    '내준' 유형은 정적 교환 평가(see)로 실제 손해인 교환만 센다. 서로 같은 값을 주고받는 잡기 뒤에 다른 수법이 숨어 있으면
+    allowed_tactic 이다. '놓친' 유형은 최선 수의 평가가 지금 기물 수보다 뚜렷이 높을 때만 센다. 최선 수가 형세를 지키기만 하는
+    잡기·체크였다면 놓친 것이 아니라 내 수가 내준 것이다."""
     try:
         b = chess.Board(p["fen"])
         mv = b.parse_san(p["san"])
@@ -331,27 +370,29 @@ def mistake_cat(p, nxt):
         except Exception:
             reply = None
     loss = p["loss"]
-    if reply and loss >= 200 and after.is_capture(reply):
+    if reply and loss >= 200 and after.is_capture(reply) and see(after, reply) > 0:
         to = reply.to_square
         pt = after.piece_type_at(to)
         if pt and pt >= chess.KNIGHT:
-            if to == mv.to_square:
-                if not b.is_capture(mv):
-                    return "into_capture"
-                if PIECE_VAL[b.piece_type_at(mv.from_square)] > PIECE_VAL[b.piece_type_at(mv.to_square) or chess.PAWN]:
-                    return "bad_trade"
-            else:
-                existed = reply.from_square in b.attackers(not me, to)     # 두기 전에도 같은 기물이 노리고 있었나
-                was_guard = mv.from_square in b.attackers(me, to)          # 움직인 기물이 그 칸을 지키고 있었나
-                return "ignored_threat" if existed and not was_guard else "unguard"
-    if best and loss >= 150 and b.is_capture(best):
-        return "missed_capture"
-    if best and loss >= 150 and b.gives_check(best):
-        return "missed_tactic"
-    if loss >= 150 and b.is_capture(mv):
+            if to != mv.to_square:
+                return "ignored_threat" if _threat_before(b, to, best) else "unguard"
+            if not b.is_capture(mv):
+                return "into_capture"
+    if loss >= 150 and b.is_capture(mv) and see(b, mv) < 0:
         return "bad_trade"
-    if reply and loss >= 200 and (after.is_capture(reply) or after.gives_check(reply) or _creates_threat(after, reply)):
+    if best and loss >= 150 and p["cp_before"] - _material(b, me) >= OPPORTUNITY_CP:
+        if b.is_capture(best):
+            return "missed_capture"
+        if b.gives_check(best):
+            return "missed_tactic"
+    recapture = b.is_capture(mv) and reply is not None and reply.to_square == mv.to_square   # 내 잡기를 되잡은 것뿐이면 수법이 아니다
+    if reply and loss >= 200 and not recapture and \
+            (after.is_capture(reply) or after.gives_check(reply) or _creates_threat(after, reply)):
         return "allowed_tactic"
+    if reply and loss >= 300:      # 조용한 수나 되잡기라도, 그 수 뒤의 기물 수보다 평가가 기물 하나 값만큼 낮으면 곧 더 잃는다
+        after.push(reply)
+        if _material(after, me) - p["cp_after"] >= 300:
+            return "allowed_tactic"
     return p["phase"]
 
 
@@ -1656,7 +1697,7 @@ def export_game(con, g):
     return path
 
 
-GAME_EXPORT_V = "2"    # 게임 상세 JSON 의 형식 버전. 올리면 다음 실행에서 모든 게임을 다시 내보낸다 (2: 실수 유형 cat)
+GAME_EXPORT_V = "3"    # 게임 상세 JSON 의 형식 버전. 올리면 다음 실행에서 모든 게임을 다시 내보낸다 (2: 실수 유형 cat, 3: 교환 평가로 다시 분류)
 
 
 def export_missing_games(con):
@@ -1932,6 +1973,10 @@ def render_all(con, cfg):
         for c in "wb":
             for r in ((S or {}).get("repertoire", {}).get(c) or {}).get("rows", []):
                 r["book"] = len(book[r["id"]]["lines"]) if r["id"] in book else 0         # 연습 라인 수
+    for c in "wb":      # 교본의 오프닝 장이 보여 줄 '이 오프닝에서 반복한 실수' (전체 기간)
+        for r in ((windows.get("all") or {}).get("repertoire", {}).get(c) or {}).get("rows", []):
+            if r["id"] in book:
+                book[r["id"]]["trouble"] = (r.get("trouble") or [])[:3]
     json.dump(dict(generated=payload["generated"], depth=BOOK_DEPTH, moves=EARLY_MOVES, openings=book),
               open(os.path.join(DOCS, "book.json"), "w"), ensure_ascii=False, separators=(",", ":"))
     json.dump(payload, open(os.path.join(DOCS, "stats.json"), "w"), ensure_ascii=False)

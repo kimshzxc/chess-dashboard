@@ -20,11 +20,11 @@ const weakRep=(c)=>c.rep.map(r=>OPS[r]).find(o=>o&&o.verdict.startsWith('weak'))
 function pick(){
   const by=(f)=>CH.filter(f).sort((a,b)=>(!!DONE[a.id])-(!!DONE[b.id]))[0];
   if(Q.get('c')) return CH.find(c=>c.id===Q.get('c'));
+  if(Q.get('next')){ const r=recommend(); return (r[0]&&r[0][0])||CH.find(c=>!DONE[c.id])||null; }
   if(Q.get('cat')) return by(c=>c.cats[0]===Q.get('cat'))||by(c=>c.cats.includes(Q.get('cat')));
   if(Q.get('rep')) return by(c=>c.rep.includes(Q.get('rep')))||CH.find(c=>c.id==='principles');
   return null;
 }
-const C=pick();
 
 /* ---------- 목차 ---------- */
 /* 먼저 읽을 장: 집중 과제(coach.json 의 focus)를 다루는 장과 취약 오프닝의 장 중 안 읽은 것 */
@@ -34,6 +34,7 @@ function recommend(){
   for(const c of CH){ const o=weakRep(c); if(o&&!DONE[c.id]&&!has(c)&&out.length<5) out.push([c,`${VERD[o.verdict][0]} · ${o.color==='w'?'백':'흑'} ${o.n}판 ${o.score}%`]); }
   return out.slice(0,4);
 }
+const C=pick();
 function rowHTML(c,i,why){
   const o=weakRep(c);
   return `<a class="lrow ${DONE[c.id]?'done':''}" href="${url(c.id)}"><span class="no">${DONE[c.id]?'✓':i+1}</span><div class="bd"><div class="tt">${esc(c.title)}</div><div class="nm">${esc(why||c.sub)}</div></div>${!why&&o?`<span class="chip ${VERD[o.verdict][1]}">${VERD[o.verdict][0]}</span>`:''}<span class="mn">${c.min}분</span></a>`;
@@ -86,8 +87,28 @@ function chapterHTML(c){
   const pz=c.cats.map(k=>[k,((COACH&&COACH.cats)||{})[k]]).find(([k,v])=>v&&v.puzzles);
   let h=`<a class="backl" href="learn.html">‹ 교본 목차</a><article class="lesson"><div class="eyebrow">${esc(part.name||'')} · ${i+1}장</div><h1>${esc(c.title)}</h1><div class="sub">${esc(c.sub)} · 약 ${c.min}분</div>${recHTML(c)}`;
   h+=c.blocks.map(blockHTML).join('');
+  h+=`<div id="mine"></div>`;
   h+=`<div class="lend"><span class="btn on" id="ldone">${DONE[c.id]?'읽음 ✓':'다 읽었습니다'}${nx?' · 다음 장 ›':''}</span><div class="row2">${pv?`<a class="btn" href="${url(pv.id)}">‹ ${esc(pv.title)}</a>`:''}${pz?`<a class="btn" href="puzzle.html?cat=${pz[0]}">${esc(catOf(pz[0]).n)} 퍼즐 ${pz[1].puzzles}개 ›</a>`:''}</div></div></article>`;
   return h;
+}
+/* 장 끝에 붙는 내 실수: 오프닝 장은 그 오프닝에서 반복한 실수(book.json 의 trouble), 나머지 장은 그 유형의 최근 실수(puzzles.json) */
+function mineCard(w,extra){
+  return `<div class="fig"><div class="figq"><b><span class="mono">${mv(w)}</span> 대신 <span class="mono">${esc(w.best)}</span></b><div class="sub">${catTag(w.cat)} ${ev(w.cp_before)} → ${ev(w.cp_after)} · ${extra} · <a href="game.html?id=${w.url.split('/').pop()}&ply=${(w.move-1)*2+(w.mover==='w'?1:2)}">이 판에서 보기 ›</a></div></div>${blunderViewer(w)}</div>`;
+}
+async function drawMine(c){
+  const el=$('#mine'); if(!el) return;
+  let ws=[], title, sub;
+  if(c.rep.length){
+    ws=c.rep.flatMap(r=>(OPS[r]&&OPS[r].trouble)||[]).sort((a,b)=>b.n*b.avg_loss-a.n*a.avg_loss).slice(0,3);
+    title='이 오프닝에서 내가 반복한 실수'; sub='같은 국면에서 같은 수를 여러 번 둔 자리입니다. 위에서 읽은 수순과 비교해 보세요.';
+  } else {
+    const pz=await get('puzzles.json')||[], rank=(w)=>{ const i=c.cats.indexOf(w.cat); return i<0?99:i; };
+    ws=pz.filter(w=>rank(w)<99).sort((a,b)=>rank(a)-rank(b)||b.date.localeCompare(a.date)).slice(0,3);
+    title='내 게임에서 나온 장면'; sub='이 장이 다루는 유형으로 분류된 내 최근 실수입니다. 판을 보고 정답을 먼저 떠올려 보세요.';
+  }
+  if(!ws.length) return;
+  el.innerHTML=`<h2>${title}</h2><p class="sub">${sub}</p>`+ws.map(w=>mineCard(w,w.n?`${w.n}번 · ${w.color==='w'?'백':'흑'}`:`${w.date.slice(5)} ${w.color==='w'?'백':'흑'} vs ${esc(w.opp)}`)).join('');
+  drawAll(el); applyTheme();
 }
 function squareAt(svg,e,flip){
   const r=svg.getBoundingClientRect(); let fx=Math.floor((e.clientX-r.left)/r.width*8), ry=Math.floor((e.clientY-r.top)/r.height*8);
@@ -112,5 +133,5 @@ document.addEventListener('click',(e)=>{
   if(e.target.closest('#ldone')&&C){ DONE[C.id]=DONE[C.id]||today(); save('learn-done',DONE); const nx=CH[CH.indexOf(C)+1]; location.href=nx?url(nx.id):'learn.html'; }
 });
 
-if(C){ document.title=`${C.title} · 교본`; $('#main').innerHTML=chapterHTML(C); drawAll($('#main')); TRY.forEach((_,i)=>drawTry(i)); applyTheme(); }
+if(C){ document.title=`${C.title} · 교본`; $('#main').innerHTML=chapterHTML(C); drawAll($('#main')); TRY.forEach((_,i)=>drawTry(i)); applyTheme(); drawMine(C); }
 else $('#main').innerHTML=listHTML();

@@ -4,6 +4,7 @@ import json, os, sys, tempfile, unittest
 from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import chess  # noqa: E402
 import pipeline  # noqa: E402
 
 START = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
@@ -66,12 +67,32 @@ class MistakeTypes(unittest.TestCase):
         cat = pipeline.mistake_cat
         self.assertEqual(cat(self.ply(self.E4E5, "Ba6", "Nf3"), dict(best="Nxa6")), "into_capture")
         self.assertEqual(cat(self.ply(self.HANGING_B, "O-O", "Bxe3"), dict(best="Bxc5")), "ignored_threat")
-        self.assertEqual(cat(self.ply(self.HANGING_B, "d6", "Bxe3", after=-200), dict(best="h3")), "missed_capture")
+        self.assertEqual(cat(self.ply(self.HANGING_B, "d6", "Bxe3", before=300, after=0), dict(best="h3")), "missed_capture")
         self.assertEqual(cat(self.ply(self.E4E5, "Nf3", "Qh5", before=9990, after=300), None), "missed_mate")
         self.assertEqual(cat(self.ply(self.E4E5, "g4", "Nf3", before=0, after=-9980), dict(best="Qh4")), "allowed_mate")
         self.assertEqual(cat(self.ply(self.E4E5, "a3", "Nf3", after=-120, phase="opening"), dict(best="Nf6")), "opening")
         for k in ("into_capture", "ignored_threat", "missed_capture", "missed_mate", "allowed_mate", "opening"):
             self.assertIn(k, pipeline.CAT_KEYS)
+
+    def test_exchange_based_rules(self):
+        """내준 유형은 그 칸의 교환이 실제로 손해일 때만, 놓친 유형은 얻을 것이 있었을 때만 붙는다 (실제 게임에서 잘못 분류되던 국면들)."""
+        cat = pipeline.mistake_cat
+        # 비숍끼리 맞바꾼 것뿐: 손해 보는 교환이 아니라 더 좋은 조용한 수(f6)를 놓친 판단 실수
+        even = "2rr2k1/1p2ppbp/p5q1/4B1p1/3P4/8/PPbQ1PPP/R1N1R1K1 b - - 3 19"
+        self.assertEqual(cat(self.ply(even, "Bxe5", "f6", before=393, after=15), dict(best="Rxe5")), "middlegame")
+        # 룩으로 폰을 잡고 룩을 잃음: 진짜 손해 교환
+        self.assertEqual(cat(self.ply("8/1pR5/1r6/4k3/8/6K1/6P1/8 w - - 4 52", "Rxb7", "Kh4", before=0, after=-593), dict(best="Rxb7")), "bad_trade")
+        # 킹을 b 줄로 옮겨 퀸이 핀에 걸리면서 c5 비숍의 수비가 사라짐: 두기 전에는 걸려 있지 않았다
+        pin = "2kr4/p1p2p1p/2p2p2/2b1p3/1qP1Pr2/1N5Q/P4P1K/1RR5 b - - 2 21"
+        self.assertEqual(cat(self.ply(pin, "Kb8", "f5", before=633, after=-765), dict(best="Nxc5")), "unguard")
+        # 같은 값의 잡기(Nxc6)로 시작해 c5 비숍을 얻는 수법: 걸린 기물을 둔 것이 아니라 상대의 다음 수를 못 본 것
+        combo = "r1bqk2r/pppp1ppp/2n2n2/2b5/3NP3/2N1B3/PPP2PPP/R2QKB1R b KQkq - 2 6"
+        self.assertEqual(cat(self.ply(combo, "O-O", "Bb6", before=0, after=-650), dict(best="Nxc6")), "allowed_tactic")
+        # 최선이 잡는 수여도 형세를 지키기만 하는 맞교환이면 '안 잡음'이 아니다
+        self.assertEqual(cat(self.ply(self.HANGING_B, "d6", "Bxe3", before=0, after=-180), dict(best="h3")), "middlegame")
+        b = chess.Board(self.E4E5)
+        self.assertEqual(pipeline.see(chess.Board("8/1pR5/1r6/4k3/8/6K1/6P1/8 w - - 4 52"), chess.Move.from_uci("c7b7")), -4)
+        self.assertEqual(pipeline.see(chess.Board(even), chess.Move.from_uci("g7e5")), 0)
 
     def test_only_real_mistakes_are_tagged(self):
         small = dict(self.ply(self.E4E5, "a3", "Nf3", after=-30), ply=3)
@@ -178,7 +199,7 @@ class WithDb(unittest.TestCase):
     def test_game_export_and_coach_file(self):
         self.assertEqual(pipeline.export_missing_games(self.con), 24)
         g = json.load(open(os.path.join(pipeline.DOCS, "games", "1000.json")))
-        self.assertEqual([p.get("cat") for p in g["plies"]], ["opening", None])       # 내 수(백)의 400 손해만 유형이 붙는다
+        self.assertEqual([p.get("cat") for p in g["plies"]], ["allowed_tactic", None])       # 내 수(백)의 400 손해만 유형이 붙는다
         self.assertEqual(pipeline.export_missing_games(self.con), 0)                  # 형식 버전이 같으면 다시 내보내지 않는다
         pipeline.meta_set(self.con, "game_export_v", "old")
         self.assertEqual(pipeline.export_missing_games(self.con), 24)
