@@ -43,7 +43,7 @@ function renderMain(){
   let h=`<div class="stick"><div class="boardwrap"><div class="evalbar" id="evalbar"><div class="w"></div><span></span></div><div id="board" style="flex:1;min-width:0"></div></div>`;
   h+=`<div class="strip" id="strip">`+G.plies.map((p,i)=>`${p.mover==='w'?`<span class="num">${p.move}.</span>`:''}<span class="mv" data-jump="${i+1}"><i style="background:${CLSCOLOR[p.cls]}"></i>${esc(p.san)}</span>`).join('')+`</div>`;
   h+=`<div class="vctl"><span class="btn nav" data-go="0">⏮</span><span class="btn nav" data-go="-1">‹</span><span class="btn nav" data-go="1">›</span><span class="btn nav" data-go="9">⏭</span></div></div>`;
-  h+=`<div class="opts"><span class="btn ${SHOW_BEST?'on':''}" id="optbest">정답 화살표</span><span class="btn" id="optflip">판 뒤집기</span></div>`;
+  h+=`<div class="opts"><span class="btn ${SHOW_BEST?'on':''}" id="optbest">정답 화살표</span></div>`;
   h+=`<div class="info card" id="info"></div>`;
   h+=lessonsHTML();
   h+=`<div class="card"><div class="sub">평가 그래프 (누르면 이동 · 점: 실수/대실수)</div>${graphSVG()}</div>`;
@@ -149,7 +149,7 @@ document.addEventListener('click',(e)=>{
   const j=e.target.closest('[data-jump]'); if(j){ go(+j.dataset.jump); return; }
   const nv=e.target.closest('[data-go]'); if(nv){ const g=+nv.dataset.go; go(g===0?0:g===9?G.plies.length:IDX+g); return; }
   if(e.target.closest('#optbest')){ SHOW_BEST=!SHOW_BEST; $('#optbest').classList.toggle('on',SHOW_BEST); draw(); return; }
-  if(e.target.closest('#optflip')){ FLIP=!FLIP; draw(); return; }
+  if(e.target.closest('#optflip')){ FLIP=!FLIP; $('#optflip').classList.toggle('on',FLIP!==(G.my_color==='b')); draw(); return; }
   const gr=e.target.closest('#graph'); if(gr){ const r=gr.getBoundingClientRect(); go(Math.round((e.clientX-r.left)/r.width*G.plies.length)); }
 });
 document.addEventListener('keydown',(e)=>{ if(!G) return; if(e.key==='ArrowLeft') go(IDX-1); else if(e.key==='ArrowRight') go(IDX+1); else if(e.key==='Home') go(0); else if(e.key==='End') go(G.plies.length); });

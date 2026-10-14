@@ -48,3 +48,6 @@ header{position:static;border-bottom:0;padding:calc(12px + env(safe-area-inset-t
 .lesson .lc{margin-left:auto;font-weight:700;font-size:14px;white-space:nowrap}
 .lesson .lm{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
 .lmv{display:inline-flex;align-items:center;min-height:34px;padding:0 11px;border-radius:9px;background:var(--surface2);border:1px solid var(--line2);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13.5px;font-weight:600;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.top .tools{display:flex;gap:8px}
+#optflip{width:42px;padding:0;flex:none}
+#optflip svg{width:18px;height:18px}

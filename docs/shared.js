@@ -69,6 +69,7 @@ const ICON={
   mistakes:'<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0zM12 9v4M12 17h.01"/>',
   puzzle:'<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1"/>',
   stats:'<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+  flip:'<path d="M7 4v16M7 4L3.5 7.5M7 4l3.5 3.5M17 20V4M17 20l-3.5-3.5M17 20l3.5-3.5"/>',
   sliders:'<path d="M4 6h8M16 6h4M4 12h2M10 12h10M4 18h10M18 18h2"/><circle cx="14" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="16" cy="18" r="2"/>',
   back:'<path d="M15 5l-7 7 7 7"/>',
 };
@@ -80,6 +81,7 @@ function tabbar(){
   return `<nav class="tabbar" id="tabbar">`+items.map(([k,n,u])=>`<a href="${u}" data-tab="${k}" class="${k===cur?'on':''}">${icon(k)}${n}</a>`).join('')+`</nav>`;
 }
 document.body.insertAdjacentHTML('beforeend',tabbar());
+{ const fb=document.getElementById('optflip'); if(fb) fb.innerHTML=icon('flip'); }
 { const tb=document.getElementById('tbtn'); if(tb){ tb.innerHTML=icon('sliders'); tb.setAttribute('aria-label','테마'); tb.setAttribute('role','button'); tb.title='테마'; } }
 /* 연습 탭 머리: 퍼즐 / 오프닝 연습 전환 (puzzle.html, train.html 공용) */
 const practiceNav=(cur)=>`<div class="tabs seg"><a class="${cur==='puzzle'?'on':''}" href="puzzle.html">퍼즐</a><a class="${cur==='train'?'on':''}" href="train.html">오프닝</a><a class="${cur==='learn'?'on':''}" href="learn.html">교본</a></div>`;
