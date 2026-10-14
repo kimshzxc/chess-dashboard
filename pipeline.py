@@ -274,8 +274,10 @@ def opp_best_captures(p, nxt):
 # 유형의 이름·설명·규칙 문장은 docs/shared.js 의 CATS 에 있다 (키가 같아야 한다).
 MISTAKE_WP = 10.0
 EARLY_MOVES = 15       # 오프닝 단계로 보는 수 (오프닝별 실수 집계)
-CAT_KEYS = ("into_capture", "ignored_threat", "unguard", "bad_trade", "allowed_tactic", "allowed_mate",
+CAT_KEYS = ("into_capture", "ignored_threat", "unguard", "bad_trade",
+            "allowed_fork", "allowed_pin", "allowed_check", "allowed_attack", "allowed_pawn", "allowed_deep", "allowed_mate",
             "missed_capture", "missed_tactic", "missed_mate", "opening", "middlegame", "endgame")
+TACTIC_KEYS = CAT_KEYS[4:10]      # '상대의 다음 수를 못 봄'을 응수의 성격으로 나눈 유형들
 PIECE_VAL = {chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3, chess.ROOK: 5, chess.QUEEN: 9, chess.KING: 0}
 
 
@@ -332,6 +334,90 @@ def _threat_before(b, to, best=None):
 OPPORTUNITY_CP = 150   # 최선 수의 평가가 지금 기물 수보다 이만큼 높아야 '얻을 것이 있었다'고 본다
 
 
+def _targets(b, sq):
+    """b: 상대가 둔 뒤 (내 차례). sq 의 상대 기물이 실제로 노리는 내 기물 칸들: 킹, 그 기물보다 비싼 기물, 지켜지지 않은 기물.
+    폰은 지켜지지 않아도 '기물'로 세지 않는다 (폰 하나의 위협은 수법이 아니라 폰 손실)."""
+    me, pt = b.turn, b.piece_type_at(sq)
+    out = []
+    for t in b.attacks(sq):
+        q = b.piece_at(t)
+        if q and q.color == me and (q.piece_type == chess.KING or PIECE_VAL[q.piece_type] > PIECE_VAL[pt]
+                                    or (q.piece_type != chess.PAWN and not b.is_attacked_by(me, t))):
+            out.append(t)
+    return out
+
+
+def _mate_threat(b):
+    """b: 내 차례. 내가 차례를 넘기면 상대가 한 수로 외통할 수 있나 (외통 위협)."""
+    if b.is_check():
+        return False
+    nb = b.copy(stack=False)
+    nb.turn, nb.ep_square = not nb.turn, None
+    for m in nb.legal_moves:
+        nb.push(m)
+        mate = nb.is_checkmate()
+        nb.pop()
+        if mate:
+            return True
+    return False
+
+
+def _pins(b, sq):
+    """b: 내 차례. sq 의 상대 직선 기물이 내 기물 둘을 한 줄로 꿰고 있나: 앞 기물이 킹이거나 뒤보다 비싸면 스큐어,
+    뒤가 킹이거나 앞보다 비싸면 핀. 폰 둘은 세지 않는다."""
+    pt = b.piece_type_at(sq)
+    dirs = []
+    if pt in (chess.BISHOP, chess.QUEEN):
+        dirs += [(1, 1), (1, -1), (-1, 1), (-1, -1)]
+    if pt in (chess.ROOK, chess.QUEEN):
+        dirs += [(1, 0), (-1, 0), (0, 1), (0, -1)]
+    me = b.turn
+    for df, dr in dirs:
+        f, r, line = chess.square_file(sq) + df, chess.square_rank(sq) + dr, []
+        while 0 <= f < 8 and 0 <= r < 8 and len(line) < 2:
+            q = b.piece_at(chess.square(f, r))
+            if q:
+                line.append(q)
+            f, r = f + df, r + dr
+        if len(line) == 2 and all(q.color == me for q in line):
+            a, c = (PIECE_VAL[q.piece_type] if q.piece_type != chess.KING else 99 for q in line)
+            if c > a or (a > c >= 3):       # 핀: 뒤가 더 비쌈 / 스큐어: 앞이 더 비싸고 뒤도 기물
+                return True
+    return False
+
+
+def _tactic_kind(after, reply):
+    """'상대의 다음 수를 못 봄'을 응수 reply 의 성격으로 나눈다. after = 내 수를 둔 국면 (상대 차례).
+      allowed_fork    한 수로 내 기물 둘(킹 포함)을 동시에 노림
+      allowed_pin     내 기물 둘을 한 줄로 꿰어 핀이나 스큐어
+      allowed_check   체크로 기물·형세를 잃음, 또는 외통 위협
+      allowed_attack  내 기물 하나를 노림 (피할 곳이 없거나 피하면서 다른 것을 잃음)
+      allowed_pawn    폰을 공짜로 잡힘 (그 잡기가 다른 위협도 만듦)
+      allowed_deep    같은 값의 교환이나 조용한 수 뒤에 숨은 수법"""
+    b = after.copy()
+    b.push(reply)
+    to, cap = reply.to_square, after.is_capture(reply)
+    gain = see(after, reply) if cap else 0
+    if cap and gain <= 0:          # 되잡히는 교환(체크여도): 그 뒤가 문제
+        return "allowed_deep"
+    tg = _targets(b, to)
+    if after.gives_check(reply):
+        if len(tg) >= 2:
+            return "allowed_fork"
+        return "allowed_pin" if _pins(b, to) else "allowed_check"
+    if _mate_threat(b):
+        return "allowed_check"
+    if len(tg) >= 2:
+        return "allowed_fork"
+    if _pins(b, to):
+        return "allowed_pin"
+    if cap and after.piece_type_at(to) == chess.PAWN or after.is_en_passant(reply):
+        return "allowed_pawn"
+    if tg:
+        return "allowed_attack"
+    return "allowed_deep"
+
+
 def mistake_cat(p, nxt):
     """실수 하나의 유형 키. p = 내 수, nxt = 바로 다음 수(상대) 레코드 또는 None. 위에서부터 먼저 맞는 것 하나.
       missed_mate     강제 외통이 있었는데 놓침
@@ -342,10 +428,11 @@ def mistake_cat(p, nxt):
       bad_trade       내가 잡았는데 그 칸의 교환이 손해
       missed_capture  이득인 잡는 수(되잡기 포함)가 최선이었는데 안 잡음
       missed_tactic   체크로 시작하는 수로 얻을 것이 있었는데 놓침
-      allowed_tactic  상대의 다음 한 수(체크·잡기·새 위협, 또는 곧 기물 하나 값을 얻는 조용한 수)를 못 봄
+      allowed_*       상대의 다음 한 수(체크·잡기·새 위협, 또는 곧 기물 하나 값을 얻는 조용한 수)를 못 봄.
+                      응수의 성격에 따라 fork / pin / check / attack / pawn / deep 으로 나눈다 (_tactic_kind)
       opening / middlegame / endgame   위에 해당하지 않는 조용한 실수 (국면별)
     '내준' 유형은 정적 교환 평가(see)로 실제 손해인 교환만 센다. 서로 같은 값을 주고받는 잡기 뒤에 다른 수법이 숨어 있으면
-    allowed_tactic 이다. '놓친' 유형은 최선 수의 평가가 지금 기물 수보다 뚜렷이 높을 때만 센다. 최선 수가 형세를 지키기만 하는
+    allowed_deep 이다. '놓친' 유형은 최선 수의 평가가 지금 기물 수보다 뚜렷이 높을 때만 센다. 최선 수가 형세를 지키기만 하는
     잡기·체크였다면 놓친 것이 아니라 내 수가 내준 것이다."""
     try:
         b = chess.Board(p["fen"])
@@ -388,11 +475,12 @@ def mistake_cat(p, nxt):
     recapture = b.is_capture(mv) and reply is not None and reply.to_square == mv.to_square   # 내 잡기를 되잡은 것뿐이면 수법이 아니다
     if reply and loss >= 200 and not recapture and \
             (after.is_capture(reply) or after.gives_check(reply) or _creates_threat(after, reply)):
-        return "allowed_tactic"
+        return _tactic_kind(after, reply)
     if reply and loss >= 300:      # 조용한 수나 되잡기라도, 그 수 뒤의 기물 수보다 평가가 기물 하나 값만큼 낮으면 곧 더 잃는다
-        after.push(reply)
-        if _material(after, me) - p["cp_after"] >= 300:
-            return "allowed_tactic"
+        nb = after.copy()
+        nb.push(reply)
+        if _material(nb, me) - p["cp_after"] >= 300:
+            return _tactic_kind(after, reply)
     return p["phase"]
 
 
@@ -1697,7 +1785,7 @@ def export_game(con, g):
     return path
 
 
-GAME_EXPORT_V = "3"    # 게임 상세 JSON 의 형식 버전. 올리면 다음 실행에서 모든 게임을 다시 내보낸다 (2: 실수 유형 cat, 3: 교환 평가로 다시 분류)
+GAME_EXPORT_V = "4"    # 게임 상세 JSON 의 형식 버전. 올리면 다음 실행에서 모든 게임을 다시 내보낸다 (2: 실수 유형 cat, 3: 교환 평가로 다시 분류, 4: 상대 수법을 여섯 유형으로)
 
 
 def export_missing_games(con):

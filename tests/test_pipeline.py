@@ -87,12 +87,32 @@ class MistakeTypes(unittest.TestCase):
         self.assertEqual(cat(self.ply(pin, "Kb8", "f5", before=633, after=-765), dict(best="Nxc5")), "unguard")
         # 같은 값의 잡기(Nxc6)로 시작해 c5 비숍을 얻는 수법: 걸린 기물을 둔 것이 아니라 상대의 다음 수를 못 본 것
         combo = "r1bqk2r/pppp1ppp/2n2n2/2b5/3NP3/2N1B3/PPP2PPP/R2QKB1R b KQkq - 2 6"
-        self.assertEqual(cat(self.ply(combo, "O-O", "Bb6", before=0, after=-650), dict(best="Nxc6")), "allowed_tactic")
+        self.assertEqual(cat(self.ply(combo, "O-O", "Bb6", before=0, after=-650), dict(best="Nxc6")), "allowed_deep")
         # 최선이 잡는 수여도 형세를 지키기만 하는 맞교환이면 '안 잡음'이 아니다
         self.assertEqual(cat(self.ply(self.HANGING_B, "d6", "Bxe3", before=0, after=-180), dict(best="h3")), "middlegame")
         b = chess.Board(self.E4E5)
         self.assertEqual(pipeline.see(chess.Board("8/1pR5/1r6/4k3/8/6K1/6P1/8 w - - 4 52"), chess.Move.from_uci("c7b7")), -4)
         self.assertEqual(pipeline.see(chess.Board(even), chess.Move.from_uci("g7e5")), 0)
+
+    def test_tactic_kinds(self):
+        """'상대의 다음 수를 못 봄'은 응수의 성격으로 여섯 가지로 나뉜다 (실제 게임 국면)."""
+        cat = pipeline.mistake_cat
+        # Nxf7 이 d6 퀸과 h8 룩을 동시에 노림
+        self.assertEqual(cat(self.ply("2kr1b1r/ppp2ppp/1q3n2/4Nb2/1P1n4/P1NPB3/2P1BPPP/R2Q1RK1 b - - 0 11", "Qd6", "Nxe2+", before=-230, after=-664), dict(best="Nxf7")), "allowed_fork")
+        # Bb8+ 가 f4 킹 뒤의 g3 룩을 꿴다 (체크 스큐어)
+        self.assertEqual(cat(self.ply("5b2/B6p/8/1K2kp2/2P1p3/1P4rP/P5P1/3R4 b - - 8 35", "Kf4", "Ke6", before=-235, after=-855), dict(best="Bb8+")), "allowed_pin")
+        # Rh2+ 체크 뒤에 a2 룩을 잃는다 (꿰는 줄은 없다)
+        self.assertEqual(cat(self.ply("8/8/6p1/2p3k1/8/3PK3/r4PR1/8 b - - 3 55", "Kh5", "Kf5", before=-1, after=-711), dict(best="Rh2+")), "allowed_check")
+        # 조용한 Qc6 가 외통을 위협한다
+        self.assertEqual(cat(self.ply("r1b1qrk1/ppp2ppp/8/5n2/2B1N2n/P1Q1B3/2P2PPP/3R1RK1 w - - 8 16", "Ng3", "Nc5", before=-6, after=-571), dict(best="Qc6")), "allowed_check")
+        # c3 가 b4 나이트 하나를 쫓는데 갈 곳이 없다
+        self.assertEqual(cat(self.ply("r2qkb1r/ppp2ppp/4pn2/3p4/1n1P1B2/1Q2PN2/PPP2PPP/RN3RK1 b kq - 3 8", "Be7", "Qc8", before=-68, after=-413), dict(best="c3")), "allowed_attack")
+        # e5 폰을 공짜로 잡히고 그 나이트가 더 노린다
+        self.assertEqual(cat(self.ply("r1bqkb1r/ppp2ppp/2n5/1B1pp3/4n3/3P1N2/PPP1QPPP/RNB2RK1 b kq - 0 6", "Nf6", "Nd6", before=-168, after=-369), dict(best="Nxe5")), "allowed_pawn")
+        # 조용한 Rfe8 뒤에 b7 의 퀸이 갇힌다
+        self.assertEqual(cat(self.ply("r4rk1/pp2bpp1/7p/3QpP2/q1p5/2P1B3/1P4PP/2KR3R w - - 0 21", "Qxb7", "Qd7", before=-14, after=-664), dict(best="Rfe8")), "allowed_deep")
+        for k in pipeline.TACTIC_KEYS:
+            self.assertIn(k, pipeline.CAT_KEYS)
 
     def test_only_real_mistakes_are_tagged(self):
         small = dict(self.ply(self.E4E5, "a3", "Nf3", after=-30), ply=3)
@@ -199,7 +219,7 @@ class WithDb(unittest.TestCase):
     def test_game_export_and_coach_file(self):
         self.assertEqual(pipeline.export_missing_games(self.con), 24)
         g = json.load(open(os.path.join(pipeline.DOCS, "games", "1000.json")))
-        self.assertEqual([p.get("cat") for p in g["plies"]], ["allowed_tactic", None])       # 내 수(백)의 400 손해만 유형이 붙는다
+        self.assertEqual([p.get("cat") for p in g["plies"]], ["allowed_deep", None])         # 내 수(백)의 400 손해만 유형이 붙는다
         self.assertEqual(pipeline.export_missing_games(self.con), 0)                  # 형식 버전이 같으면 다시 내보내지 않는다
         pipeline.meta_set(self.con, "game_export_v", "old")
         self.assertEqual(pipeline.export_missing_games(self.con), 24)

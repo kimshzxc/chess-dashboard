@@ -17,7 +17,7 @@ header{position:static;border-bottom:0;padding:calc(14px + env(safe-area-inset-t
 .result.ng .ic{background:color-mix(in srgb,var(--critical) 20%,transparent);color:var(--critical)}
 .acts{display:flex;gap:8px;justify-content:center;margin-top:12px;flex-wrap:wrap}
 .acts .btn{min-width:130px;min-height:46px}
-.pzmodes{display:flex;gap:8px;overflow-x:auto;margin:0 -16px;padding:2px 16px 4px;scrollbar-width:none}
+.pzmodes{display:flex;gap:8px;overflow-x:auto;margin:0 -16px;padding:2px 16px 4px;scrollbar-width:none;-webkit-mask-image:linear-gradient(90deg,#000 calc(100% - 24px),transparent);mask-image:linear-gradient(90deg,#000 calc(100% - 24px),transparent)}
 .pzmodes::-webkit-scrollbar{display:none}
 .pzmodes a{flex:none;display:inline-flex;align-items:center;min-height:38px;padding:0 14px;border-radius:999px;border:1px solid var(--line2);background:var(--surface);color:var(--text2);font-size:13.5px;font-weight:600;white-space:nowrap}
 .pzmodes a.on{background:var(--me-soft);border-color:var(--me);color:var(--text)}

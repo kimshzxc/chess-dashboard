@@ -211,14 +211,21 @@ function catsSection(S){
   const co=coachOf(S);
   let h=`<section id="s-cats" data-view="mistakes" data-sub="cats"><h2>실수 유형<small>승률을 10%p 이상 잃은 수 ${co.n}개 · 막대는 잃은 승률 중 비중</small></h2>`;
   if(!co.cats.length) return h+'<div class="empty">이 기간에는 해당하는 실수가 없습니다.</div></section>';
-  if(!catData(S,OPEN_CAT)) OPEN_CAT=co.cats[0].key;
   const mx=Math.max(...co.cats.map(c=>c.share),1);
-  for(const c of co.cats){ const m=catOf(c.key), open=c.key===OPEN_CAT;
-    h+=`<div class="card cat ${open?'open':''}" id="cat-${c.key}"><div class="cath" data-cat="${c.key}" role="button" aria-expanded="${open}">
-      <div class="ct"><b>${esc(m.n)}</b>${co.focus.includes(c.key)?'<span class="chip me">집중 과제</span>':''}<span class="shr">${c.share}%</span></div>
-      <div class="cbar"><i style="width:${(c.share/mx*100).toFixed(1)}%"></i></div>
-      <div class="sub">${CATG[m.g]} · ${c.n}회 · 평균 −${c.avg}%p ${trendChip(c.trend)}</div></div>
-      <div class="catb">${open?catBody(c):''}</div></div>`; }
+  /* 묶음(기물을 내줌 / 상대 수를 못 봄 / 내 기회를 놓침 / 조용한 판단 실수)별로 모아 보인다. 묶음은 비중 합 순서, 안에서는 비중 순서 */
+  const groups=new Map(); for(const c of co.cats){ const g=catOf(c.key).g; if(!groups.has(g)) groups.set(g,[]); groups.get(g).push(c); }
+  const sum=(cs)=>cs.reduce((a,c)=>a+c.share,0);
+  const ordered=[...groups].sort((a,b)=>sum(b[1])-sum(a[1]));
+  if(!catData(S,OPEN_CAT)) OPEN_CAT=ordered[0][1][0].key;      // 처음에는 맨 위 카드가 펼쳐져 있다
+  for(const [g,cs] of ordered){
+    h+=`<div class="cgroup"><b>${CATG[g]}</b><span>${cs.length}가지 · ${Math.round(sum(cs))}%</span></div>`;
+    for(const c of cs){ const m=catOf(c.key), open=c.key===OPEN_CAT;
+      h+=`<div class="card cat ${open?'open':''}" id="cat-${c.key}"><div class="cath" data-cat="${c.key}" role="button" aria-expanded="${open}">
+        <div class="ct"><b>${esc(m.n)}</b>${co.focus.includes(c.key)?'<span class="chip me">집중 과제</span>':''}<span class="shr">${c.share}%</span></div>
+        <div class="cbar"><i style="width:${(c.share/mx*100).toFixed(1)}%"></i></div>
+        <div class="sub">${c.n}회 · 평균 −${c.avg}%p ${trendChip(c.trend)}</div></div>
+        <div class="catb">${open?catBody(c):''}</div></div>`; }
+  }
   return h+'</section>';
 }
 function showCat(key, scroll){

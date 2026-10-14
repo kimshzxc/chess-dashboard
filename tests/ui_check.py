@@ -290,7 +290,13 @@ def run(c, base, server, shots):
                 const cap=L.states[0].caption||''; const m=cap.match(/정답 ([^<\\s]+)/); if(m && L.states[1] && L.states[1].san!==m[1]) bad++; } return bad;})()""")
             check("정답 수와 정답 수순의 첫 수가 같다", mis == 0, f"불일치 {mis}")
             if co.get("cats"):
-                check("유형 카드 수와 순서가 데이터와 같다", c.ev("[...document.querySelectorAll('#s-cats .cat')].map(e=>e.id.slice(4))") == [x["key"] for x in co["cats"]])
+                grp = c.ev("Object.fromEntries(Object.entries(CATS).map(([k,v])=>[k,v.g]))")
+                gsum = {}
+                for x in co["cats"]:
+                    gsum[grp[x["key"]]] = gsum.get(grp[x["key"]], 0) + x["share"]
+                want = [x["key"] for x in sorted(co["cats"], key=lambda x: (-gsum[grp[x["key"]]], -x["share"]))]
+                check("유형 카드가 묶음별로, 묶음과 유형은 비중 순서로 나온다", c.ev("[...document.querySelectorAll('#s-cats .cat')].map(e=>e.id.slice(4))") == want
+                      and c.ev("document.querySelectorAll('#s-cats .cgroup').length") == len(gsum))
                 snap("cats")
                 k2 = co["cats"][1]["key"] if len(co["cats"]) > 1 else co["cats"][0]["key"]
                 c.tap(f'#cat-{k2} .cath'); c.pump(0.5)
