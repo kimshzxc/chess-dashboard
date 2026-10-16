@@ -153,9 +153,11 @@ class WithDb(unittest.TestCase):
     def test_stats_end_to_end(self):
         S = pipeline.compute_stats(pipeline.load_games(self.con), self.con)
         self.assertEqual(S["overview"]["games"], 24)
-        for k in ("time", "phase", "conversion", "tactics", "openings", "monthly", "recent", "worst", "examples", "tilt", "rating_series", "weaknesses"):
+        for k in ("time", "phase", "conversion", "tactics", "openings", "monthly", "recent", "worst", "examples", "tilt", "rating_series", "weaknesses", "log"):
             self.assertIn(k, S)
         self.assertEqual(len(S["rating_series"]), 24)
+        self.assertEqual(len(S["log"]), 24)
+        self.assertEqual(sum(sum(x["c"].values()) for x in S["log"]), S["coach"]["n"])     # 판별 기록의 실수 수는 유형 집계와 같다
         self.assertEqual(S["tilt"]["sessions"]["n"], 4)
         self.assertEqual(S["tilt"]["sessions"]["max_len"], 6)
         for w in S["weaknesses"]:

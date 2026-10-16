@@ -947,6 +947,11 @@ def compute_stats(games, con=None):
     S["tilt"] = tilt_stats(games)
     S["rating_series"] = [[g["date"], g["my_elo"], g["outcome"]] for g in games]
 
+    # --- 판별 실수 기록 (홈의 "이번 규칙 하나"가 규칙을 정한 뒤의 판을 세는 데 쓴다): id, 끝난 시각, 날짜, 결과, 유형별 개수, 유리할 때(+3 이상)의 실수 수
+    S["log"] = [dict(id=g["url"].rstrip("/").split("/")[-1], t=g["end_time"], d=g["date"], r=g["outcome"],
+                     c=dict(Counter(p["cat"] for p in g["plies"] if p.get("cat"))),
+                     w=sum(1 for p in g["plies"] if p.get("cat") and p["cp_before"] >= 300)) for g in games]
+
     # --- 최근 게임 / 최악의 실수
     S["recent"] = []
     for g in games[-25:][::-1]:

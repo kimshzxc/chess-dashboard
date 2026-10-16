@@ -173,6 +173,19 @@ h2+.cgroup{margin-top:2px}
 .frow .fline{margin-top:8px;font-size:12.5px;color:var(--muted)}
 .frow .shr b{font-size:18px;font-weight:800;letter-spacing:-.02em;white-space:nowrap}
 #s-coach .lastg{margin-top:12px}
+.rulecard .rt{font-size:16px;font-weight:800;line-height:1.4;margin-top:4px}
+.rulecard .v{font-size:14px;line-height:1.55;margin-top:8px}
+.rulecard .rseq{margin-top:10px}
+.rulecard .seq{flex-wrap:wrap;gap:4px}
+.rulecard .seq i{width:11px;height:11px}
+.rulecard .prog{height:6px;border-radius:3px;background:var(--surface2);margin-top:10px;overflow:hidden}
+.rulecard .prog i{display:block;height:100%;background:var(--s1);border-radius:3px}
+.rulecard .links{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+.rrow{display:flex;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid var(--line);cursor:pointer;-webkit-tap-highlight-color:transparent}
+.rrow .rn{font-size:14.5px;font-weight:700;line-height:1.4}
+.rrow i{flex:none;width:22px;height:22px;border-radius:50%;border:1.5px solid var(--line2);font-style:normal;font-size:13px;line-height:20px;text-align:center;margin-left:auto}
+.rrow.on i{background:var(--good);border-color:var(--good);color:#fff}
+.sheet-b .k{font-size:12.5px;color:var(--text2);font-weight:600}
 .pzs{margin-top:0}.pzs .pz{margin-top:0}
 .repcard>.k:first-child{margin-top:0}
 .trainlink{margin:0 0 12px}

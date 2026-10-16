@@ -180,6 +180,60 @@ function routineLine(){
   return `<div class="routine" id="routine"><span class="k">오늘</span>${items.map(([n,d,u])=>`<a class="${d?'done':''}" href="${u}"><i>${d?'✓':''}</i>${n}</a>`).join('')}</div>`;
 }
 window.addEventListener('pageshow',()=>{ const el=document.getElementById('routine'); if(el) el.outerHTML=routineLine(); });
+/* ---------- 이번 규칙 하나: 규칙을 하나 정하고, 정한 뒤의 판에서 그 실수가 몇 판에 나왔는지 센다 (기기에 저장) ---------- */
+const GIVE_BLIND=['into_capture','ignored_threat','unguard','allowed_fork','allowed_pin','allowed_check','allowed_attack','allowed_pawn','allowed_deep','allowed_mate'];
+const RULES=[
+  {id:'scan',n:'손을 떼기 전에 상대의 체크, 잡는 수, 위협을 한 번 훑는다',d:'상대 수를 못 본 유형과 기물을 내준 유형을 모두 센다',cats:GIVE_BLIND},
+  {id:'take',n:'내 차례마다 잡을 수 있는 것과 둘 수 있는 체크를 전부 본다',d:'내 기회를 놓친 유형을 센다',cats:['missed_capture','missed_tactic','missed_mate']},
+  {id:'win',n:'이기고 있을 때도 똑같이 확인한다',d:'+3 이상 유리할 때 나온 실수를 유형에 상관없이 센다',win:true},
+];
+const ruleOf=(id)=>RULES.find(r=>r.id===id)||(id&&id.startsWith('cat:')&&CATS[id.slice(4)]?{id,n:CATS[id.slice(4)].rule,d:`"${CATS[id.slice(4)].n}" 유형을 센다`,cats:[id.slice(4)]}:null);
+const RULE_K='chess-rule', RULE_N=20, RULE_BASE=30;
+const ruleState=()=>{ try{ const r=JSON.parse(localStorage.getItem(RULE_K)||'null'); return r&&ruleOf(r.id)?r:null; }catch(e){ return null; } };
+const ruleHits=(rule,g)=>rule.win?(g.w||0):rule.cats.reduce((a,k)=>a+((g.c||{})[k]||0),0);
+function setRule(id){
+  const S=DATA.windows[W], log=(S&&S.log)||[], last=log.length?log[log.length-1].t:0;
+  const r={id,since:last,set:new Date(Date.now()+9*3600*1000).toISOString().slice(0,10)};
+  try{ localStorage.setItem(RULE_K,JSON.stringify(r)); }catch(e){}
+  const el=document.getElementById('s-rule'); if(el) el.outerHTML=ruleSection(S);
+}
+function ruleSection(S){
+  const log=S.log||[]; if(!log.length) return '';
+  const st=ruleState(), rule=st&&ruleOf(st.id);
+  let body;
+  if(!rule){
+    const sug=RULES[0];
+    body=`<div class="v">집중 과제 세 가지를 한 번에 고치기는 어렵습니다. 다음 ${RULE_N}판은 규칙 하나만 지키고, 그 실수가 줄었는지 여기서 봅니다.</div>
+      <div class="rt">${esc(sug.n)}</div><div class="sub">${esc(sug.d)}</div>
+      <div class="links"><span class="btn on" data-setrule="${sug.id}">이 규칙으로 시작</span><span class="btn" data-pickrule>다른 규칙 고르기</span></div>`;
+  }else{
+    const after=log.filter(g=>g.t>st.since), before=log.filter(g=>g.t<=st.since).slice(-RULE_BASE);
+    const hits=after.map(g=>ruleHits(rule,g)), n=after.length, hitG=hits.filter(x=>x>0).length;
+    const pg=n?hits.reduce((a,b)=>a+b,0)/n:0, bpg=before.length?before.reduce((a,g)=>a+ruleHits(rule,g),0)/before.length:null;
+    let chip='';
+    if(n>=RULE_N&&bpg!=null) chip=pg<=bpg*0.7?'<span class="chip good">줄었습니다</span>':pg>=bpg*1.3?'<span class="chip critical">늘었습니다</span>':'<span class="chip">그대로입니다</span>';
+    const shown=after.slice(-40);
+    body=`<div class="rt">${esc(rule.n)}</div><div class="sub">${esc(rule.d)} · ${st.set.slice(5)}부터</div>
+      <div class="rseq"><span class="seq" role="img" aria-label="규칙 뒤 ${n}판 중 ${hitG}판에서 발생">${shown.map(g=>`<i class="${ruleHits(rule,g)>0?'hit':''}" title="${g.d}"></i>`).join('')}</span></div>
+      <div class="v">${n?`규칙 뒤 <b>${n}판 중 ${hitG}판</b>에서 나옴 · 판당 ${pg.toFixed(2)}회`:'규칙을 정한 뒤 둔 판이 아직 없습니다.'}${bpg!=null?` · 규칙 전 ${before.length}판은 판당 ${bpg.toFixed(2)}회`:''} ${chip}</div>
+      ${n<RULE_N?`<div class="prog"><i style="width:${(n/RULE_N*100).toFixed(0)}%"></i></div><div class="sub">${RULE_N}판을 채우면 전과 비교해 판단합니다 (${n}/${RULE_N})</div>`:''}
+      <div class="links"><span class="btn" data-pickrule>규칙 바꾸기</span><span class="btn" data-setrule="${rule.id}">다시 시작</span></div>`;
+  }
+  return `<section id="s-rule" data-view="home"><h2>이번 규칙 하나<small>한 번에 하나만 바꾼다 · 기록은 이 기기에 남습니다</small></h2><div class="card rulecard">${body}</div></section>`;
+}
+function openRulePicker(){
+  const cur=ruleState(), S=DATA.windows[W], co=coachOf(S);
+  const row=(r,tag)=>`<div class="rrow ${cur&&cur.id===r.id?'on':''}" data-setrule="${r.id}" role="button"><div><div class="rn">${esc(r.n)}</div><div class="sub">${tag?`${tag} · `:''}${esc(r.d)}</div></div><i>${cur&&cur.id===r.id?'✓':''}</i></div>`;
+  let h=`<div class="k">묶음 규칙</div>${RULES.map(r=>row(r)).join('')}<div class="k" style="margin-top:14px">유형별 규칙</div>`;
+  const keys=[...co.focus,...co.cats.map(c=>c.key).filter(k=>!co.focus.includes(k))];
+  h+=keys.map(k=>row(ruleOf('cat:'+k),co.focus.includes(k)?'집중 과제':'')).join('');
+  $('#sheet-title').textContent='규칙 하나 고르기'; $('#sheet-sub').textContent='다음 20판 동안 지킬 것 하나';
+  $('#sheet-body').innerHTML=h; $('#sheet-body').scrollTop=0; $('#sheet').classList.add('open'); document.body.style.overflow='hidden';
+}
+document.addEventListener('click',(e)=>{
+  const p=e.target.closest('[data-pickrule]'); if(p){ openRulePicker(); return; }
+  const s=e.target.closest('[data-setrule]'); if(s){ setRule(s.dataset.setrule); closeSheet(); }
+});
 function coachSection(S){
   const co=coachOf(S); if(!co.cats.length) return '';
   const focus=co.focus.map(k=>catData(S,k)).filter(Boolean);
@@ -394,6 +448,7 @@ function render(){
   </div>
   ${routineLine()}
   </section>`;
+  h+=ruleSection(S);
   h+=coachSection(S);
   let hw=`<section id="s-weak" data-view="stats" data-sub="weak"><h2>경기 운영 보완점<small>시간·컨디션·마무리에서 뽑은 항목 · 누르면 추이</small></h2>`;
   if(!S.weaknesses.length) hw+='<div class="empty">두드러진 약점이 없습니다.</div>';

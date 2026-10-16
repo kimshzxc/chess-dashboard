@@ -248,7 +248,24 @@ def run(c, base, server, shots):
     snap("home")
     co = S.get("coach") or {}
     if co.get("cats"):
-        check("홈은 레이팅이 맨 위, 그다음이 집중 과제", c.ev("[...document.querySelectorAll('#main>section:not([hidden])')].map(s=>s.id||s.className)")[:2] == ["hero", "s-coach"])
+        check("홈은 레이팅, 이번 규칙 하나, 집중 과제 순서", c.ev("[...document.querySelectorAll('#main>section:not([hidden])')].map(s=>s.id||s.className)")[:3] == ["hero", "s-rule", "s-coach"])
+        log = S.get("log") or []
+        check("이번 규칙 하나: 처음에는 시작 버튼", c.ev("!!document.querySelector('#s-rule [data-setrule=\"scan\"]')") and not c.ev("!!document.querySelector('#s-rule .rseq')"))
+        c.tap('#s-rule [data-pickrule]'); c.pump(0.4)
+        check("규칙 고르기 시트: 묶음 규칙 3개와 유형별 규칙", c.ev("document.querySelector('#sheet').classList.contains('open')") and c.ev("document.querySelectorAll('#sheet .rrow').length") == 3 + len(co["cats"]))
+        c.tap('#sheet .rrow[data-setrule="take"]'); c.pump(0.4)
+        check("규칙을 고르면 카드에 규칙이 뜨고 시트가 닫힌다", not c.ev("document.querySelector('#sheet').classList.contains('open')") and "체크를 전부" in (c.ev("document.querySelector('#s-rule .rt')?.textContent") or "")
+              and c.ev("document.querySelectorAll('#s-rule .rseq i').length") == 0)
+        if len(log) >= 6:
+            since = log[-5]["t"]; after = log[-4:]
+            hit = sum(1 for g in after if sum(g["c"].get(k, 0) for k in ("missed_capture", "missed_tactic", "missed_mate")) > 0)
+            c.ev(f"localStorage.setItem('chess-rule', JSON.stringify({{id:'take', since:{since}, set:'2026-01-01'}}))")
+            c.go(base + "index.html" + q(), READY); c.pump(0.5)
+            dots = c.ev("[document.querySelectorAll('#s-rule .rseq i').length, document.querySelectorAll('#s-rule .rseq i.hit').length]")
+            check("규칙 뒤의 판마다 점이 찍히고 그 실수가 난 판이 표시된다", dots == [4, hit], dots)
+            check("규칙 전 판당 횟수가 보인다", "규칙 전" in (c.ev("document.querySelector('#s-rule .v')?.textContent") or ""))
+            snap("home_rule")
+        c.ev("localStorage.removeItem('chess-rule')"); c.go(base + "index.html" + q(), READY); c.pump(0.4)
         check("집중 과제가 비중 순으로 나온다", c.ev("document.querySelectorAll('#s-coach .frow').length") == len(co["focus"])
               and c.ev("[...document.querySelectorAll('#s-coach .frow .shr b')].map(e=>parseFloat(e.textContent))") == [x["share"] for x in co["cats"] if x["key"] in co["focus"]],
               c.ev("[...document.querySelectorAll('#s-coach .frow .fn')].map(e=>e.textContent)"))
@@ -263,7 +280,7 @@ def run(c, base, server, shots):
               and c.ev("!!document.querySelector('#s-cats .cat.open .viewer svg.board')") and c.ev("!document.querySelector('#s-cats').hidden"))
         c.ev("history.back()"); c.pump(0.8)
         check("뒤로 가면 홈", c.ev("document.querySelector('#tabbar a.on')?.dataset.tab") == "home")
-    check("홈은 레이팅·집중 과제·직전 판만", c.ev("[...document.querySelectorAll('#main>section:not([hidden])')].map(s=>s.id)") == ["hero", "s-coach"] and c.ev("!document.querySelector('#main>section:not([hidden]) .weak')"))
+    check("홈은 레이팅·규칙 하나·집중 과제·직전 판만", c.ev("[...document.querySelectorAll('#main>section:not([hidden])')].map(s=>s.id)") == ["hero", "s-rule", "s-coach"] and c.ev("!document.querySelector('#main>section:not([hidden]) .weak')"))
     for tab in ("games", "mistakes", "stats"):
         c.ev("window.scrollTo(0,600)"); c.pump(0.3)
         ok = c.tap(f'#tabbar a[data-tab="{tab}"]', None); c.pump(0.9)
