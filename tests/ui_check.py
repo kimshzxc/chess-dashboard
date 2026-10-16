@@ -487,7 +487,10 @@ def run(c, base, server, shots):
         check("둘 수 없는 칸을 누르면 채점하지 않고 안내만 한다", c.ev("!document.querySelector('#pzresult .result')") and c.ev("document.querySelector('#pztoast').classList.contains('on')")
               and c.ev("document.querySelectorAll('#pzboard svg.board rect[fill=\"var(--sq-hl)\"]').length") == 1, f"{frm}{illegal}")
         accepted = {p["best_uci"][:4]} | {x["uci"][:4] for x in p.get("alts", [])}
-        wrong = next((m for m in sorted(legal4) if m not in accepted and m[:2] == frm), None) or next(m for m in sorted(legal4) if m not in accepted)
+        wrong = next((m for m in sorted(legal4) if m not in accepted and m[:2] == frm), None) or next((m for m in sorted(legal4) if m not in accepted), None)
+        check("둘 수 있는 수가 모두 정답인 퍼즐은 없다", wrong is not None, (p["id"], p["legal"]))
+        if wrong is None:
+            wrong = next(m for m in sorted(legal4) if m != p["best_uci"][:4])
         if wrong[:2] != frm:
             tap_sq(p, wrong[:2])
         tap_sq(p, wrong[2:4]); c.pump(0.5)

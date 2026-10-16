@@ -2111,12 +2111,15 @@ def puzzle_candidates(con, limit=200):
             if not L or not L.get("puzzle_ok") or not L.get("best_line"):
                 continue
             b = chess.Board(p["fen"])
+            legal = {m.uci()[:4] for m in b.legal_moves}
+            if legal <= {b.parse_san(p["best"]).uci()[:4]} | {a["uci"][:4] for a in L.get("alts", [])}:
+                continue                                       # 둘 수 있는 수가 모두 정답이면 문제가 되지 않는다
             w = dict(id=f"{game_id(g['url'])}-{p['ply']}", ply=p["ply"], url=g["url"], date=g["date"], opp=g["opp"], color=g["my_color"],
                      move=p["move"], mover=p["mover"], san=p["san"], best=p["best"], cp_before=p["cp_before"], cp_after=p["cp_after"],
                      wp_loss=p["wp_loss"], clock=p["clock"], phase=p["phase"], fen=p["fen"], cat=p.get("cat"),
                      uci=b.parse_san(p["san"]).uci(), best_uci=b.parse_san(p["best"]).uci(),
                      best_line=L["best_line"], refutation=L.get("refutation", []), alts=L.get("alts", []),
-                     legal=" ".join(sorted({m.uci()[:4] for m in b.legal_moves})))   # 브라우저가 둘 수 없는 수를 걸러내는 데 쓴다
+                     legal=" ".join(sorted(legal)))   # 브라우저가 둘 수 없는 수를 걸러내는 데 쓴다
             b.push_san(p["san"])
             w["after_fen"] = b.fen()
             out.append(w)

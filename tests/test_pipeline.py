@@ -214,6 +214,10 @@ class WithDb(unittest.TestCase):
         self.assertEqual(pz[0]["alts"][0]["uci"], "g1f3")
         self.add_lines_not_ok()
         self.assertEqual(pipeline.export_puzzles(self.con), 0)        # 좋은 수가 너무 많은 국면은 퍼즐에서 뺀다
+        self.con.execute("DELETE FROM lines")
+        every = [dict(san=chess.Board().san(m), uci=m.uci()) for m in chess.Board().legal_moves if m.uci() != "d2d4"]
+        self.add_lines(alts=every)
+        self.assertEqual(pipeline.export_puzzles(self.con), 0)        # 둘 수 있는 수가 모두 정답인 국면도 뺀다
 
     def test_moves_cache_and_export(self):
         """모든 수 평가: 할 일 목록은 퍼즐 국면이 먼저이고, 가짜 엔진으로 채우면 퍼즐·연습 라인에 moves 가 붙는다."""
