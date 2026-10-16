@@ -40,7 +40,7 @@ function lessonsHTML(){
 }
 function renderMain(){
   const s=G.summary, n=G.plies.length;
-  let h=`<div class="stick"><div class="boardwrap"><div class="evalbar" id="evalbar"><div class="w"></div><span></span></div><div id="board" style="flex:1;min-width:0"></div></div>`;
+  let h=`<div class="stick"><div class="boardwrap">${evalBarHTML('evalbar')}<div id="board" style="flex:1;min-width:0"></div></div>`;
   h+=`<div class="strip" id="strip">`+G.plies.map((p,i)=>`${p.mover==='w'?`<span class="num">${p.move}.</span>`:''}<span class="mv" data-jump="${i+1}"><i style="background:${CLSCOLOR[p.cls]}"></i>${esc(p.san)}</span>`).join('')+`</div>`;
   h+=`<div class="vctl"><span class="btn nav" data-go="0">⏮</span><span class="btn nav" data-go="-1">‹</span><span class="btn nav" data-go="1">›</span><span class="btn nav" data-go="9">⏭</span></div></div>`;
   h+=`<div class="info card" id="info"></div>`;
@@ -117,11 +117,7 @@ function draw(){
   const arrows=[];
   if(SHOW_BEST){ if(p&&p.cls!=='best'&&p.cls!=='good'&&p.best_uci) arrows.push([p.best_uci,GREEN]); else if(nx&&nx.best_uci) arrows.push([nx.best_uci,GREEN]); }
   $('#board').innerHTML=boardSVG(fen,{flip:FLIP,arrows,last:p?[p.uci.slice(0,2),p.uci.slice(2,4)]:[]});
-  const cpw=p?p.cp_w:0; const wp=Math.abs(cpw)>=9000?(cpw>0?100:0):(50+50*(2/(1+Math.exp(-0.00368208*cpw))-1));
-  const bar=$('#evalbar'); const wEl=bar.querySelector('.w');
-  wEl.style.height=wp+'%'; if(FLIP){wEl.style.top='0';wEl.style.bottom='auto';} else {wEl.style.top='auto';wEl.style.bottom='0';}
-  const sp=bar.querySelector('span'); sp.textContent=evW(cpw).replace('+',''); const whiteAhead=cpw>=0; sp.style.color=whiteAhead?'#000':'#fff';
-  const atBottom = whiteAhead ? !FLIP : FLIP; sp.style.top=atBottom?'auto':'2px'; sp.style.bottom=atBottom?'2px':'auto';
+  setEvalBar($('#evalbar'), p?p.cp_w:0, FLIP);
   let info='';
   if(!p) info=`<b>시작 국면</b> · › 버튼, 판 스와이프, 수 목록, 그래프로 이동` + (nx&&SHOW_BEST?`<div class="sub">초록 화살표: 이 국면의 엔진 추천 ${esc(nx.best)}</div>`:'');
   else {

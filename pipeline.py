@@ -30,6 +30,9 @@ LINE_DEPTH = 18        # 실수 국면의 정답/반격 수순 깊이 (수 평�
 LINES_BATCH = 40       # 한 번 실행에 수순을 계산할 국면 수 (최근 게임부터)
 BOOK_DEPTH = 16        # 오프닝 연습 라인의 국면 평가 깊이 (상위 3수)
 BOOK_BATCH = 150       # 한 번 실행에 오프닝 연습용으로 평가할 국면 수
+MOVES_DEPTH = 12       # 퍼즐·오프닝 연습 국면의 모든 합법 수 평가 깊이 (둬 본 수의 승률 표시용)
+MOVES_BATCH = 60       # 한 번 실행에 모든 수를 평가할 국면 수
+MOVES_TIME = 3.0       # 국면 하나의 모든 수 평가에 쓰는 최대 초 (깊이에 먼저 닿으면 그때 끝) · 감시 루프를 오래 막지 않도록
 BOOK_LINES = 4         # 오프닝 하나에 만드는 라인 수 (메인라인 + 상대가 자주 두는 갈래)
 BOOK_MIN_N = 8         # 이 판 수 이상이거나 취약한 오프닝에 연습 라인을 만든다
 ALT_WP = 5.0           # 최선 수와 승률 차이가 이 안(%p)이면 같이 좋은 수로 인정
@@ -88,6 +91,7 @@ def db():
     CREATE TABLE IF NOT EXISTS lines(fen TEXT, played TEXT, best TEXT, data TEXT, PRIMARY KEY(fen, played, best));
     CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT);
     CREATE TABLE IF NOT EXISTS book(fen TEXT PRIMARY KEY, depth INTEGER, data TEXT);
+    CREATE TABLE IF NOT EXISTS moves(fen TEXT PRIMARY KEY, depth INTEGER, data TEXT);
     """)
     cols = {r[1] for r in con.execute("PRAGMA table_info(games)")}
     if "pushed" not in cols:
@@ -559,7 +563,7 @@ def engine_lines(eng, fen, played_san, best_san):
     puzzle_ok = (len(good) < 3                                  # 정답 포함 좋은 수가 4개 이상이면 아무 수나 정답이 된다
                  and top_wp - ref_wp <= ALT_WP                  # 저장된 최선이 엔진 1순위보다 뚜렷이 나쁘면 분석이 엇갈린 것
                  and not any(e[0] == played for e in good))     # 내가 둔 수가 좋은 수로 나오면 실수 판정이 엇갈린 것
-    alts = [dict(san=b.san(e[0]), uci=e[0].uci()) for e in good if e[0] != played]
+    alts = [dict(san=b.san(e[0]), uci=e[0].uci(), cp=e[1]) for e in good if e[0] != played]
     refutation = []
     b2 = b.copy()
     b2.push(played)
@@ -656,6 +660,81 @@ def cached_lines(con, fen, san, best=None):
                 bl = []
             return dict(best_line=bl, refutation=d.get("refutation", []), alts=[])
     return dict(best_line=[], refutation=[], alts=[])
+
+
+# ---------------------------------------------------------------- 모든 수 평가 (둬 본 수의 승률)
+# 퍼즐과 오프닝 연습에서 어떤 수를 두든 그 수 뒤의 승률을 보여 주려고, 그 국면의 합법 수 전부를 한 번에 평가해 둔다.
+# 얕은 깊이(MOVES_DEPTH)라 최선 수·실제로 둔 수의 값은 저장된 깊은 분석을 쓰고, 나머지 수만 이 값을 쓴다.
+def cached_moves(con, fen):
+    """국면의 합법 수 평가 {uci 앞 4글자: cp (둘 쪽 기준)}. 아직 계산되지 않았으면 None."""
+    r = con.execute("SELECT data FROM moves WHERE fen=? AND depth=?", (fen, MOVES_DEPTH)).fetchone()
+    return json.loads(r[0]) if r else None
+
+
+def eval_moves(eng, fen):
+    """합법 수 전부를 multipv 로 한 번에 평가한다. 승격은 가장 좋은 승격 하나로 합친다."""
+    b = chess.Board(fen)
+    n = b.legal_moves.count()
+    if not n:
+        return {}
+    out = {}
+    for i in eng.analyse(b, chess.engine.Limit(depth=MOVES_DEPTH, time=MOVES_TIME), multipv=n):
+        if not i.get("pv"):
+            continue
+        u, cp = i["pv"][0].uci()[:4], cp_of(i["score"], b.turn)
+        if u not in out or cp > out[u]:
+            out[u] = cp
+    return out
+
+
+def book_my_fens(con, games):
+    """오프닝 연습 라인에서 내가 둘 국면(수를 두기 전 FEN) 목록."""
+    out = []
+    for o in build_book(con, games)[0].values():
+        for ln in o["lines"]:
+            prev = chess.STARTING_FEN
+            for p in ln["plies"]:
+                if p["mine"]:
+                    out.append(prev)
+                prev = p["fen"]
+    return out
+
+
+def moves_todo(con, games=None):
+    """모든 수 평가가 필요한데 아직 없는 국면: 퍼즐 국면(최근 것부터), 그다음 오프닝 연습 국면."""
+    todo, seen = [], set()
+    for fen in [w["fen"] for w in puzzle_candidates(con)] + book_my_fens(con, games if games is not None else load_games(con)):
+        if fen not in seen:
+            seen.add(fen)
+            if cached_moves(con, fen) is None:
+                todo.append(fen)
+    return todo
+
+
+def enrich_moves(con, cfg, limit=MOVES_BATCH, eng=None):
+    """퍼즐·오프닝 연습 국면의 모든 수를 평가해 moves 테이블에 쌓는다. (평가한 국면 수, 남은 국면 수)"""
+    todo = moves_todo(con)
+    if not todo:
+        return 0, 0
+    batch = todo[:limit]
+    log(f"모든 수 평가 {len(batch)}개 국면 (남은 {len(todo) - len(batch)}개, depth {MOVES_DEPTH})")
+    own = eng is None
+    if own:
+        eng = chess.engine.SimpleEngine.popen_uci(stockfish_path(cfg))
+        eng.configure({"Hash": 128, "Threads": WORKERS})
+    try:
+        for fen in batch:
+            try:
+                data = eval_moves(eng, fen)
+            except Exception as e:   # 한 국면이 실패해도 계속. 빈 결과를 저장해 매번 다시 시도하지 않는다
+                log(f"  모든 수 평가 실패 {fen}: {e}")
+                data = {}
+            con.execute("INSERT OR REPLACE INTO moves(fen,depth,data) VALUES(?,?,?)", (fen, MOVES_DEPTH, json.dumps(data, separators=(",", ":"))))
+        con.commit()
+    finally:
+        if own:
+            eng.quit()
+    return len(batch), len(todo) - len(batch)
 
 
 PLY_COLS = ("ply", "move", "mover", "mine", "san", "best", "is_best", "cp_before", "cp_after", "loss", "wp_loss",
@@ -1270,6 +1349,9 @@ def book_line(con, eng, budget, c, grp_idx, all_idx, alt=None):
                     node["bad"] = dict(san=us, uci=uci_of(fen, us), n=un, loss=round(avg, 1))
             node["ok"] = [dict(san=x["san"], uci=x["uci"]) for x in ok if x["san"] != san]
             reply = next((x.get("reply") for x in ev if x["san"] == san), None)
+            mv_ev = cached_moves(con, fen)
+            if mv_ev:
+                node["moves"] = mv_ev                             # 라인에 없는 수를 둬 봤을 때의 승률 표시용
         try:
             mv = b.parse_san(san)
         except Exception:                                     # 이 진행에서는 둘 수 없는 수: 라인을 여기서 끝낸다
@@ -2013,8 +2095,8 @@ def _read_code_hash():
     return open(p).read().strip() if os.path.exists(p) else ""
 
 
-def export_puzzles(con, limit=200):
-    """내 실수 국면을 퍼즐로 내보낸다: 승률 20%p 이상 잃은 수, 아직 가망이 있던 국면, 최근 게임부터.
+def puzzle_candidates(con, limit=200):
+    """퍼즐이 되는 내 실수 국면: 승률 20%p 이상 잃은 수, 아직 가망이 있던 국면, 최근 게임부터.
     수순과 복수 정답이 계산된 국면만 쓰고, 좋은 수가 너무 많거나 분석이 엇갈린 국면(puzzle_ok=False)은 뺀다."""
     out = []
     for g in con.execute("SELECT * FROM games WHERE analyzed=1 ORDER BY end_time DESC").fetchall():
@@ -2040,8 +2122,18 @@ def export_puzzles(con, limit=200):
             out.append(w)
         if len(out) >= limit:
             break
-    json.dump(out[:limit], open(os.path.join(DOCS, "puzzles.json"), "w"), ensure_ascii=False, separators=(",", ":"))
-    return len(out[:limit])
+    return out[:limit]
+
+
+def export_puzzles(con, limit=200):
+    """퍼즐 JSON 을 쓴다. 모든 수 평가(moves)가 있는 국면에는 같이 붙인다."""
+    out = puzzle_candidates(con, limit)
+    for w in out:
+        m = cached_moves(con, w["fen"])
+        if m:
+            w["moves"] = m
+    json.dump(out, open(os.path.join(DOCS, "puzzles.json"), "w"), ensure_ascii=False, separators=(",", ":"))
+    return len(out)
 
 
 def render_all(con, cfg):
@@ -2152,13 +2244,21 @@ def main():
             meta_set(con, "book_pending", "1" if book_left and book_n else "0")   # 더 평가할 것이 없는데 남았으면 그만둔다
         except Exception as e:
             log(f"오프닝 연습 라인 계산 실패: {e}")
+    # 퍼즐·오프닝 연습 국면의 모든 수 평가: 퍼즐이나 라인이 바뀌었을 때, 또는 지난번에 다 못 했을 때
+    moves_n = 0
+    if new_done or code_changed or a.render_only or lines_n or book_n or meta_get(con, "moves_pending") != "0":
+        try:
+            moves_n, moves_left = enrich_moves(con, cfg)
+            meta_set(con, "moves_pending", "1" if moves_left else "0")
+        except Exception as e:
+            log(f"모든 수 평가 실패: {e}")
     if new_done:
         con.commit()
         con.execute("VACUUM")   # 커밋되는 DB 파일을 작게 유지
     pending_notify = [dict(r) for r in con.execute("SELECT * FROM games WHERE analyzed=1 AND notified=0")]
     if code_changed:
         log("코드가 바뀌어 통계를 다시 만듭니다")
-    rendered = bool(new_done or lines_n or book_n or a.render_only or code_changed or not os.path.exists(index))
+    rendered = bool(new_done or lines_n or book_n or moves_n or a.render_only or code_changed or not os.path.exists(index))
     if rendered:
         # 수순이 새로 계산된 게임의 상세 JSON 은 다시 내보낸다
         for url in set(new_done) | lines_urls:

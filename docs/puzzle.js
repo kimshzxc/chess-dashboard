@@ -98,10 +98,23 @@ function render(){
   const w=cur();
   let h=`<div id="pzhead">${headHTML()}</div>`;
   h+=`<div class="task">${TD.rv[w.id]?'<span class="rv">복습</span>':''}${colorName(w.color)} 차례 · 가장 좋은 수를 찾으세요<div class="sub">${esc(w.date)} · vs ${esc(w.opp)} · ${w.move}수 · ${PH[w.phase]||''}</div></div>`;
-  h+=`<div class="pzboard" id="pzboard"></div><div class="toast" id="pztoast"></div><div id="pzresult"></div><div class="acts" id="pzacts"></div>`;
+  h+=`<div class="boardwrap">${evalBarHTML('pzeval')}<div class="pzboard" id="pzboard"></div></div><div class="toast" id="pztoast"></div><div id="pzresult"></div><div class="acts" id="pzacts"></div>`;
   $('#main').innerHTML=h;
-  if(answered()) showAnswer(undefined,true);
+  pzBar(w.cp_before);
+  if(answered()) showAnswer((TD.mv||{})[w.id],true);
   else { $('#pzacts').innerHTML=`<span class="btn" id="giveup">모르겠어요</span>`; drawBoard(); }
+}
+/* 판 왼쪽 평가 막대. cp 는 둘 쪽(나) 기준이라 백 기준으로 바꿔 넣는다 */
+function pzBar(cp){ const w=cur(); setEvalBar($('#pzeval'), cp==null?null:(w.mover==='w'?cp:-cp), w.color==='b'); }
+/* 둔 수 뒤의 평가(둘 쪽 기준). 최선·실전의 수는 깊은 분석값, 비슷한 정답은 수순 계산값, 나머지는 모든 수 평가(moves, 얕은 깊이라 최선보다 높게는 잡지 않는다).
+   모르는 수(예전 퍼즐)는 null */
+function moveCp(w,uci){
+  if(uci==null) return w.cp_before;
+  const u=uci.slice(0,4);
+  if(u===w.best_uci.slice(0,4)) return w.cp_before;
+  if(u===w.uci.slice(0,4)) return w.cp_after;
+  const alt=(w.alts||[]).find(a=>a.uci.slice(0,4)===u); if(alt) return alt.cp!=null?Math.min(alt.cp,w.cp_before):w.cp_before;
+  const m=w.moves&&w.moves[u]; return m==null?null:Math.min(m,w.cp_before);
 }
 const legalOf=(w)=>w.legal?w.legal.split(' '):null;   // 예전 형식의 퍼즐에는 없을 수 있다
 function drawBoard(extra={}){
@@ -129,7 +142,7 @@ function answer(uci){
   const w=cur();
   const accepted=new Set([w.best_uci.slice(0,4), ...(w.alts||[]).map(a=>a.uci.slice(0,4))]);   // 최선 수와, 승률 차이가 작아 같이 인정하는 수
   const ok=uci!==null&&accepted.has(uci.slice(0,4));
-  TD.res[w.id]=ok?'ok':'ng'; saveDay();
+  TD.res[w.id]=ok?'ok':'ng'; (TD.mv=TD.mv||{})[w.id]=uci; saveDay();
   const h=HIST[TODAY]||{ok:0,n:0}; h.n++; if(ok) h.ok++; HIST[TODAY]=h; save('puzzle-history',HIST);
   SEEN[w.id]=TODAY; const sk=Object.keys(SEEN); if(sk.length>MAX_SEEN) sk.sort((a,b)=>SEEN[a].localeCompare(SEEN[b])).slice(0,sk.length-MAX_SEEN).forEach(k=>delete SEEN[k]); save('puzzle-seen',SEEN);
   const r=REVIEW[w.id];
@@ -145,6 +158,7 @@ function showAnswer(uci,restored){
   const alt=uci?(w.alts||[]).find(a=>a.uci.slice(0,4)===uci.slice(0,4)):null;
   const arrows=[]; if(uci) arrows.push([uci, ok?GREEN:RED]); if(!ok||alt||!uci) arrows.push([w.best_uci, alt?BLUE:GREEN]);
   SEL=null; drawBoard({arrows});
+  const mcp=uci===undefined?w.cp_before:moveCp(w,uci); if(mcp!=null) pzBar(mcp);
   const tk=$('#pztoast'); if(tk) tk.classList.remove('on');
   if(!restored) $('#pzboard').classList.add(ok?'ok':'ng');
   const lost=`실전에서는 <span class="mono">${esc(w.san)}</span> 을 두어 승률을 ${w.wp_loss}%p 잃었습니다`;
@@ -154,6 +168,7 @@ function showAnswer(uci,restored){
   else if(alt) msg=`<span class="ic">정답</span><b>${esc(alt.san)}</b> 도 좋은 수입니다. 엔진의 첫째 선택은 <b>${esc(w.best)}</b> 이지만 차이가 작습니다. ${lost}.`;
   else if(ok) msg=`<span class="ic">정답</span><b>${esc(w.best)}</b> 가 가장 좋은 수입니다. ${lost}.`;
   else msg=`<span class="ic">오답</span>가장 좋은 수는 <b>${esc(w.best)}</b> 입니다. ${lost} (${ev(w.cp_before)} → ${ev(w.cp_after)}).`;
+  if(uci) msg+=`<div style="margin-top:4px">내가 둔 <span class="mono">${esc(uciSan(w,uci))}</span> 뒤 ${wpChange(w.cp_before,mcp)||'<span class="sub">승률 계산 없음</span>'}</div>`;
   const others=(w.alts||[]).filter(a=>a!==alt).map(a=>esc(a.san));
   if(others.length) msg+=`<div class="sub" style="margin-top:6px">${alt?'그 밖에':'같이'} 정답으로 인정되는 수: ${others.join(', ')}</div>`;
   if(w.cat) msg+=`<div class="sub" style="margin-top:8px">${catTag(w.cat,COACH&&COACH.focus&&COACH.focus.includes(w.cat)?'rep':'')} 두기 전에: ${esc(catOf(w.cat).rule)}</div>`;
@@ -165,6 +180,14 @@ function showAnswer(uci,restored){
   $('#pzacts').innerHTML=`<a class="btn" href="game.html?id=${gameId(w.url)}&ply=${w.ply}">게임에서 보기</a><span class="btn on" id="next">다음 퍼즐 ›</span>`;
   $('#pzhead').innerHTML=headHTML();
   if(!restored) $('#next').scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+/* 둔 수의 표기: 최선·실전·비슷한 정답은 저장된 SAN, 나머지는 기물 글자+칸으로 간단히 */
+function uciSan(w,uci){
+  const u=uci.slice(0,4);
+  if(u===w.best_uci.slice(0,4)) return w.best; if(u===w.uci.slice(0,4)) return w.san;
+  const alt=(w.alts||[]).find(a=>a.uci.slice(0,4)===u); if(alt) return alt.san;
+  const pc=parseFen(w.fen).find(x=>x.sq===u.slice(0,2)), cap=parseFen(w.fen).some(x=>x.sq===u.slice(2,4));
+  return (pc&&pc.p[1]!=='P'?pc.p[1]:'')+(cap?(pc&&pc.p[1]==='P'?u[0]+'x':'x'):'')+u.slice(2,4);
 }
 document.addEventListener('pointerdown',(e)=>{
   const svg=e.target.closest('#pzboard svg.board'); if(!svg||answered()) return;

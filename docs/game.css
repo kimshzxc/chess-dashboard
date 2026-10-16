@@ -7,11 +7,6 @@ header{position:static;border-bottom:0;padding:calc(12px + env(safe-area-inset-t
 .players .res{width:auto;padding:0 14px;height:32px;font-size:13.5px;border-radius:999px}
 .stick{background:var(--bg);padding:10px 0 8px;margin:4px -16px 0;padding-left:16px;padding-right:16px;z-index:4}
 @media (min-height:700px){.stick{position:sticky;top:0;border-bottom:1px solid var(--line)}}
-.boardwrap{display:flex;gap:8px;align-items:stretch;max-width:470px;margin:0 auto}
-.evalbar{width:20px;border-radius:8px;overflow:hidden;background:#2b2a28;position:relative;flex:none}
-.evalbar .w{position:absolute;left:0;right:0;background:#f0f0f0;transition:height .25s ease}
-.evalbar span{position:absolute;left:0;right:0;text-align:center;font-size:10px;font-weight:700;font-family:ui-monospace,Menlo,monospace}
-.boardwrap .board{flex:1;max-width:440px;margin:0}
 .strip{display:flex;gap:4px;overflow-x:auto;max-width:470px;margin:8px auto 0;padding:2px 0;scrollbar-width:none;align-items:center}
 .strip::-webkit-scrollbar{display:none}
 .strip .num{flex:none;color:var(--muted);font-size:12px;padding-left:6px}

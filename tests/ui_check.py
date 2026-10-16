@@ -165,6 +165,12 @@ class CDP:
         return out
 
 
+def winpct(cp):
+    """파이프라인·shared.js 와 같은 승률 식"""
+    import math
+    return 100.0 if cp >= 9000 else 0.0 if cp <= -9000 else 50 + 50 * (2 / (1 + math.exp(-0.00368208 * cp)) - 1)
+
+
 def fen_set(fen, flip):
     out = set()
     for ri, row in enumerate(fen.split()[0].split("/")):
@@ -468,6 +474,8 @@ def run(c, base, server, shots):
         o = c.ev(OVER); check("가로 넘침 없음 (퍼즐)", o[0] <= o[1], o)
         td0 = c.ev(LS("puzzle-day")); check("오늘의 묶음이 저장된다", td0 and len(td0["ids"]) == td0["daily"] <= 10 and all(i in td0["pz"] for i in td0["ids"]), f"{td0 and td0['daily']}문제")
         center_board(); p = current(); check("화면의 국면이 저장된 첫 문제와 같다", p, p and (p["id"], p["best"], [a["san"] for a in p.get("alts", [])]))
+        bar0 = c.ev("document.querySelector('.boardwrap > #pzeval + #pzboard') && document.querySelector('#pzeval .w').style.height")
+        check("판 왼쪽에 평가 막대가 서고 시작 값은 국면 평가", bar0 and abs(float(bar0[:-1]) - (winpct(p["cp_before"]) if p["mover"] == "w" else 100 - winpct(p["cp_before"]))) < 0.6, bar0)
         board = chess.Board(p["fen"]); frm, to = p["best_uci"][:2], p["best_uci"][2:4]
         tap_sq(p, frm)
         dots = c.ev("document.querySelectorAll('#pzboard svg.board > circle').length"); legal_from = len({m.uci()[:4] for m in board.legal_moves if m.uci()[:2] == frm})
@@ -484,6 +492,11 @@ def run(c, base, server, shots):
             tap_sq(p, wrong[:2])
         tap_sq(p, wrong[2:4]); c.pump(0.5)
         check("둘 수 있지만 나쁜 수는 오답", c.ev("!!document.querySelector('#pzresult .result.ng')"), c.ev("document.querySelector('#pzresult .result')?.innerText.slice(0,46)"))
+        wpt = c.ev("document.querySelector('#pzresult .result .wp')?.innerText") or ""; bar1 = c.ev("document.querySelector('#pzeval .w').style.height")
+        if wrong in p.get("moves", {}):
+            check("둔 수 뒤의 승률이 붙고 막대가 그 값으로 바뀐다", wpt.startswith("승률") and (bar1 != bar0 or "유지" in wpt), (wpt, bar0, bar1))
+        else:
+            check("모든 수 평가가 없는 퍼즐은 '승률 계산 없음'", "승률 계산 없음" in (c.ev("document.querySelector('#pzresult .result')?.innerText") or ""), wrong)
         check("진행 점과 기록이 바로 갱신된다", c.ev("document.querySelectorAll('.prog .dots i.ng').length") == 1 and "0 / 1" in (c.ev("document.querySelector('.streakcard').innerText") or ""),
               (c.ev("document.querySelector('.streakcard').innerText") or "").replace("\n", " ")[:60])
         rv = c.ev(LS("puzzle-review")) or {}
@@ -503,6 +516,7 @@ def run(c, base, server, shots):
         tap_sq(p2, mv[:2]); tap_sq(p2, mv[2:4]); c.pump(0.5)
         txt = c.ev("document.querySelector('#pzresult .result')?.innerText") or ""
         check("정답" + (" (최선과 비슷한 다른 수도 인정)" if use else ""), c.ev("!!document.querySelector('#pzresult .result.ok')") and (not use or "도 좋은 수" in txt), txt[:50])
+        check("정답 뒤에도 승률 문구", "승률" in (c.ev("document.querySelector('#pzresult .result .wp')?.innerText") or ""), c.ev("document.querySelector('#pzresult .result .wp')?.innerText"))
         check("정답이면 보드에 표시가 붙는다", "ok" in (c.ev("document.querySelector('#pzboard').className") or ""))
         snap("puzzle_ok")
         c.tap("#next"); c.pump(0.5); c.tap("#giveup"); c.pump(0.5)
@@ -570,6 +584,7 @@ def run(c, base, server, shots):
         TREADY = "!!document.querySelector('#tboard svg.board') && document.querySelector('.prog b')?.textContent==='내 차례'"
         url = base + "train.html?o=" + urllib.request.quote(oid) + q("?")
         check("연습 페이지가 뜨고 내 차례까지 진행된다", c.go(url, TREADY) and c.ev("document.querySelectorAll('.pzmodes a').length") == len(ob["lines"]), ob["name"])
+        check("연습 판 옆에 평가 막대", c.ev("!!document.querySelector('.boardwrap > #teval + #tboard') && document.querySelector('#teval span').textContent.length>0"), c.ev("document.querySelector('#teval span')?.textContent"))
         o = c.ev(OVER); check("가로 넘침 없음 (연습)", o[0] <= o[1], o)
 
         def tsq(sq):
@@ -591,11 +606,14 @@ def run(c, base, server, shots):
         bad = next(m.uci() for m in brd.legal_moves if m.uci()[:4] not in good and not brd.piece_at(m.to_square))
         tsq(bad[:2]); tsq(bad[2:4]); c.pump(0.3)
         check("라인에 없는 수는 받지 않는다", c.ev("document.querySelector('#tmsg').classList.contains('ng')") and shown() == fen_set(startfen, black), c.ev("document.querySelector('#tmsg').innerText")[:40])
+        if bad[:4] in P[i0].get("moves", {}):
+            check("라인에 없는 수를 두면 그 수의 승률을 보여 준다", "승률" in (c.ev("document.querySelector('#tmsg .wp')?.innerText") or ""), c.ev("document.querySelector('#tmsg .wp')?.innerText"))
         for i in mine:
             c.wait("document.querySelector('.prog b')?.textContent==='내 차례'", 6)
             tsq(P[i]["uci"][:2]); tsq(P[i]["uci"][2:4]); c.pump(0.25)
         ok = c.wait("document.querySelector('.prog b')?.textContent==='라인 끝'", 8)
         check("정답 수를 끝까지 두면 라인이 끝난다", ok and shown() == fen_set(P[-1]["fen"], black), f"{len(mine)}수")
+        check("라인 끝 문구에 승률", "승률" in (c.ev("document.querySelector('#tmsg').innerText") or ""))
         dn = c.ev(LS("train-done")) or {}
         check("완료 기록: 틀린 수가 있었으므로 '실수 없이'는 아니다", dn.get(oid, {}).get("0", {}).get("n") == 1 and dn[oid]["0"]["clean"] == 0, dn.get(oid))
         snap("train_done")
@@ -635,8 +653,12 @@ def run(c, base, server, shots):
     c.ev("document.querySelector('#try0').scrollIntoView({block:'center'})"); c.pump(0.3)
     wrong = next(m for m in ("g1h1", "g1f1") if m != t["uci"]); press(wrong[:2]); press(wrong[2:])
     check("틀린 수는 다시 찾게 한다", c.ev("document.querySelector('#try0 .trym').classList.contains('ng')"))
+    if "cp" in t:
+        check("문제 판 옆에 평가 막대, 틀린 수의 승률", c.ev("!!document.querySelector('#try0 .boardwrap > #tryev0 + .tryb')") and "승률" in (c.ev("document.querySelector('#try0 .trym .wp')?.innerText") or ""), c.ev("document.querySelector('#try0 .trym .wp')?.innerText"))
     press(t["uci"][:2]); press(t["uci"][2:4])
     check("정답을 두면 해설이 나온다", c.ev("document.querySelector('#try0 .trym').classList.contains('ok')") and t["san"] in c.ev("document.querySelector('#try0 .trym').textContent"))
+    if "cp" in t:
+        check("정답 뒤 승률", "승률" in (c.ev("document.querySelector('#try0 .trym .wp')?.innerText") or ""), c.ev("document.querySelector('#try0 .trym .wp')?.innerText"))
     snap("learn_chapter")
     c.ev("document.querySelector('#ldone').click()"); nxt = chs[chs.index(ch) + 1]["id"]
     check("읽음 표시 뒤 다음 장으로", c.wait(f"location.search.includes('c={nxt}') && !!document.querySelector('.lesson h1')", 6) and "mates" in (c.ev(LS("learn-done")) or {}))

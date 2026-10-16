@@ -215,6 +215,30 @@ class WithDb(unittest.TestCase):
         self.add_lines_not_ok()
         self.assertEqual(pipeline.export_puzzles(self.con), 0)        # 좋은 수가 너무 많은 국면은 퍼즐에서 뺀다
 
+    def test_moves_cache_and_export(self):
+        """모든 수 평가: 할 일 목록은 퍼즐 국면이 먼저이고, 가짜 엔진으로 채우면 퍼즐·연습 라인에 moves 가 붙는다."""
+        import chess
+
+        class Eng:                                     # 엔진 대역: 합법 수마다 다른 점수
+            def analyse(self, b, limit, multipv=1):
+                return [dict(pv=[m], score=chess.engine.PovScore(chess.engine.Cp(50 - 5 * i), b.turn)) for i, m in enumerate(list(b.legal_moves)[:multipv])]
+        self.add_lines()
+        todo = pipeline.moves_todo(self.con)
+        self.assertEqual(todo[0], START)                                         # 퍼즐(백의 첫 수 실수) 국면이 먼저
+        self.assertEqual(len(todo), len(set(todo)))
+        n, left = pipeline.enrich_moves(self.con, {}, limit=1, eng=Eng())
+        self.assertEqual((n, left), (1, len(todo) - 1))
+        m = pipeline.cached_moves(self.con, START)
+        self.assertEqual(len(m), 20)
+        self.assertEqual(m[next(iter(chess.Board().legal_moves)).uci()], 50); self.assertEqual(min(m.values()), 50 - 5 * 19)
+        self.assertEqual(pipeline.moves_todo(self.con), todo[1:])                 # 계산한 국면은 할 일에서 빠진다
+        pipeline.export_puzzles(self.con)
+        pz = json.load(open(os.path.join(pipeline.DOCS, "puzzles.json")))
+        self.assertEqual(pz[0]["fen"], START); self.assertEqual(pz[0]["moves"]["e2e4"], m["e2e4"])
+        self.assertTrue(all("moves" not in w for w in pz if w["fen"] != START))
+        self.assertEqual(max(pipeline.eval_moves(Eng(), "7k/8/8/8/8/8/8/K7 w - - 0 1").values()), 50)
+        self.assertEqual(pipeline.eval_moves(Eng(), "7k/5Q2/6K1/8/8/8/8/8 b - - 0 1"), {})   # 둘 수 없는 국면(외통)은 빈 결과
+
     def add_lines_not_ok(self):
         self.con.execute("DELETE FROM lines"); self.add_lines(puzzle_ok=False)
 
@@ -268,6 +292,12 @@ class WithDb(unittest.TestCase):
         book, n, pending = pipeline.build_book(self.con, pipeline.load_games(self.con), Eng(), 1000)
         self.assertEqual((sorted(book), pending), (["b-kings_pawn", "w-kings_pawn"], 0))
         self.assertTrue(all(ln["plies"] for o in book.values() for ln in o["lines"]))
+        fens = pipeline.book_my_fens(self.con, pipeline.load_games(self.con))
+        self.assertIn(START, fens)                                                         # 백 라인의 첫 수 국면
+        self.assertTrue(all("moves" not in p for o in book.values() for ln in o["lines"] for p in ln["plies"]))
+        self.con.execute("INSERT INTO moves VALUES(?,?,?)", (START, pipeline.MOVES_DEPTH, json.dumps({"e2e4": 30, "d2d4": 25})))
+        book = pipeline.build_book(self.con, pipeline.load_games(self.con))[0]
+        self.assertEqual(book["w-kings_pawn"]["lines"][0]["plies"][0]["moves"]["d2d4"], 25)  # 모든 수 평가가 있으면 내 수 자리에 붙는다
 
     def test_cached_lines_fallback(self):
         self.con.execute("CREATE TABLE pv_cache(fen TEXT, played TEXT, data TEXT, PRIMARY KEY(fen, played))")
@@ -300,6 +330,10 @@ class WithDb(unittest.TestCase):
                     bd = chess.Board(b["fen"]); bd.push_uci(b["uci"])
                     self.assertEqual(bd.fen(), b["after"])
                     self.assertEqual(b["mate"], bd.is_checkmate())
+                    self.assertIn("cp", b, "lessons/build.py --eval 로 문제 국면을 평가하세요")
+                    self.assertEqual(b["cp"], max(b["moves"].values()))
+                    self.assertIn(b["uci"][:4], b["moves"])
+                    self.assertGreaterEqual(b["moves"][b["uci"][:4]], b["cp"] - 200, b["san"])      # 정답이 최선과 크게 다르지 않다
                 if b["t"] == "line":
                     for ln in b["lines"]:
                         bd = chess.Board(ln["fen"])

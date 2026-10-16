@@ -39,7 +39,13 @@ let LI=NX?NX[1]:Math.max(0,Math.min(O?O.lines.length-1:0,+(Q.get('l')||0)||0));
 let ST=null;   // {i: 다음에 둘 수의 순번, wrong: 이 수에서 틀린 횟수, miss: 이 라인에서 틀린 수의 개수, shown: 정답을 본 수, msg, sel, busy, done}
 const line=()=>O.lines[LI];
 const fenAt=(i)=>i>0?line().plies[i-1].fen:START;
-function reset(){ ST={i:0,wrong:0,miss:0,shown:0,msg:'',cls:'',sel:null,busy:false,done:false,arrows:[]}; autoOpp(true); }
+function reset(){ ST={i:0,wrong:0,miss:0,shown:0,msg:'',cls:'',sel:null,busy:false,done:false,arrows:[],wcp:null}; autoOpp(true); }
+/* i수가 놓인 국면의 평가(내 기준). 내 수의 cp 는 그 수를 둔 뒤의 값이고 상대 수에는 없으므로, 상대가 둔 뒤에는 다음 내 수의 값을 쓴다 */
+function stateCp(i){
+  const P=line().plies; if(i>0&&P[i-1].mine&&P[i-1].cp!=null) return P[i-1].cp;
+  const nx=P.slice(i).find(x=>x.mine&&x.cp!=null); return nx?nx.cp:line().cp;
+}
+const toW=(cp)=>cp==null?null:(O.color==='w'?cp:-cp);
 /* 내 차례가 올 때까지 상대 수(와 첫 화면의 흐름)를 놓는다 */
 function autoOpp(instant){
   const P=line().plies;
@@ -69,7 +75,7 @@ function render(){
   const myNo=P.slice(0,ST.i).filter(x=>x.mine).length, myTot=P.filter(x=>x.mine).length;
   let h=headHTML();
   h+=`<div class="prog"><div><b>${ST.done?'라인 끝':ST.busy?'상대 차례':'내 차례'}</b> <span class="sub">${ST.done?`${myTot}수 완료`:`내 ${Math.min(myNo+1,myTot)}수째 / ${myTot}`}</span></div><div class="pbar"><i style="width:${(myNo/myTot*100).toFixed(1)}%"></i></div></div>`;
-  h+=`<div class="pzboard ${ST.cls}" id="tboard">${boardSVG(fenAt(ST.i),{flip,last:ST.sel?[ST.sel]:last?[last.uci.slice(0,2),last.uci.slice(2,4)]:[],arrows:ST.arrows})}</div>`;
+  h+=`<div class="boardwrap">${evalBarHTML('teval')}<div class="pzboard ${ST.cls}" id="tboard">${boardSVG(fenAt(ST.i),{flip,last:ST.sel?[ST.sel]:last?[last.uci.slice(0,2),last.uci.slice(2,4)]:[],arrows:ST.arrows})}</div></div>`;
   let msg=ST.msg;
   if(!msg&&!ST.done&&!ST.busy&&p){
     if(last&&!last.mine) msg=`상대 <b class="mono">${esc(last.san)}</b>${last.eng?' <span class="sub">(내 게임에 없는 국면: 엔진의 수)</span>':last.n?` <span class="sub">(내 게임 ${last.n}판)</span>`:''}. `;
@@ -78,7 +84,7 @@ function render(){
   }
   if(ST.done){
     const clean=!ST.miss&&!ST.shown;
-    msg=`<span class="ic">${clean?'완벽':'완료'}</span>${clean?'실수 없이 끝까지 뒀습니다.':`틀린 수 ${ST.miss}개${ST.shown?`, 정답을 본 수 ${ST.shown}개`:''}. 실수 없이 끝낼 때까지 다시 해 보세요.`} 이 진행의 끝 형세는 <b>${cpTxt(line().cp)}</b> (내 기준)입니다.`;
+    msg=`<span class="ic">${clean?'완벽':'완료'}</span>${clean?'실수 없이 끝까지 뒀습니다.':`틀린 수 ${ST.miss}개${ST.shown?`, 정답을 본 수 ${ST.shown}개`:''}. 실수 없이 끝낼 때까지 다시 해 보세요.`} 이 진행의 끝 형세는 <b>${cpTxt(line().cp)}</b> (내 기준, 승률 ${wpTxt(line().cp)})입니다.`;
   }
   h+=`<div class="result ${ST.done?(ST.miss||ST.shown?'':'ok'):ST.cls==='ng'?'ng':ST.cls==='ok'?'ok':''}" id="tmsg">${msg||'&nbsp;'}</div>`;
   h+=movesHTML();
@@ -89,6 +95,7 @@ function render(){
     ${P.filter(x=>x.bad).map(x=>`<div class="sub">${x.move}수: 평소 <span class="mono">${esc(x.bad.san)}</span> (${x.bad.n}번, 평균 −${x.bad.loss}%p) 대신 <b class="mono">${esc(x.san)}</b></div>`).join('')}</details>`;
   const keep=document.querySelector('details.allm'); const open=keep&&keep.open;
   $('#main').innerHTML=h; if(open) document.querySelector('details.allm').open=true;
+  setEvalBar($('#teval'), toW(ST.wcp!=null?ST.wcp:stateCp(ST.i)), flip);
   applyTheme();
 }
 function squareAt(svg,e){
@@ -99,19 +106,21 @@ function squareAt(svg,e){
 const mineAt=(sq)=>{ const x=parseFen(fenAt(ST.i)).find(q=>q.sq===sq); return x&&x.p[0]===O.color; };
 function play(uci){
   const p=line().plies[ST.i], u=uci.slice(0,4);
-  if(u===p.uci.slice(0,4)){ advance(`<span class="ic">정답</span><b class="mono">${esc(p.san)}</b>${p.mineN?` <span class="sub">평소 두던 수 그대로입니다 (${p.mineN}번).</span>`:''}`); return; }
+  const wp=(cp)=>cp!=null?` <span class="wp">승률 ${wpTxt(cp)}</span>`:'';
+  if(u===p.uci.slice(0,4)){ advance(`<span class="ic">정답</span><b class="mono">${esc(p.san)}</b>${wp(p.cp)}${p.mineN?` <span class="sub">평소 두던 수 그대로입니다 (${p.mineN}번).</span>`:''}`); return; }
   const alt=(p.ok||[]).find(a=>a.uci.slice(0,4)===u);
-  if(alt){ advance(`<span class="ic">정답</span><b class="mono">${esc(alt.san)}</b> 도 좋은 수입니다. 이 연습에서는 <b class="mono">${esc(p.san)}</b> 로 진행합니다.`); return; }
+  if(alt){ advance(`<span class="ic">정답</span><b class="mono">${esc(alt.san)}</b> 도 좋은 수입니다${wp(p.moves&&p.moves[u]!=null?Math.min(p.moves[u],p.cp):p.cp)}. 이 연습에서는 <b class="mono">${esc(p.san)}</b> 로 진행합니다.`); return; }
   ST.wrong++; if(ST.wrong===1) ST.miss++;
   ST.cls='ng'; ST.sel=null;
   const usual=p.bad&&p.bad.uci&&p.bad.uci.slice(0,4)===u;
-  ST.msg=`<span class="ic">다시</span>${usual?`평소 두던 수입니다 (${p.bad.n}번, 평균 −${p.bad.loss}%p). 여기가 고칠 자리입니다.`:'이 라인의 수가 아닙니다.'} ${ST.wrong>=2?'움직일 기물을 표시했습니다.':'다시 찾아보세요.'}`;
+  const m=p.moves&&p.moves[u]; ST.wcp=(m==null||p.cp==null)?null:Math.min(m,p.cp);   // 라인에 없는 수를 둬 봤을 때의 승률 (막대가 잠시 그 값으로)
+  ST.msg=`<span class="ic">다시</span>${usual?`평소 두던 수입니다 (${p.bad.n}번, 평균 −${p.bad.loss}%p). 여기가 고칠 자리입니다.`:'이 라인의 수가 아닙니다.'} ${ST.wrong>=2?'움직일 기물을 표시했습니다.':'다시 찾아보세요.'}${ST.wcp!=null?` <span class="sub">이 수를 두면</span> ${wpChange(p.cp,ST.wcp)}`:''}`;
   ST.arrows=[]; if(ST.wrong>=2) ST.sel=p.uci.slice(0,2);
   render();
   setTimeout(()=>{ if(ST&&ST.cls==='ng'){ ST.cls=''; const b=$('#tboard'); if(b) b.classList.remove('ng'); } },400);
 }
 function advance(msg){
-  ST.i++; ST.wrong=0; ST.sel=null; ST.cls='ok'; ST.msg=msg; ST.arrows=[];
+  ST.i++; ST.wrong=0; ST.sel=null; ST.cls='ok'; ST.msg=msg; ST.arrows=[]; ST.wcp=null;
   if(ST.i>=line().plies.length){ finish(); return; }
   ST.busy=true; render();
   setTimeout(()=>{ if(!ST) return; ST.cls=''; ST.msg=''; ST.busy=false; autoOpp(false); },650);
@@ -122,8 +131,8 @@ document.addEventListener('pointerdown',(e)=>{
   if(ST.sel&&sq!==ST.sel&&!mineAt(sq)){ const u=ST.sel+sq; play(u); return; }
   if(ST.sel&&sq!==ST.sel&&mineAt(sq)){   // 캐슬링을 킹→룩으로 누르는 경우도 받는다
     const p=line().plies[ST.i]; if(/^O-O/.test(p.san)&&ST.sel===p.uci.slice(0,2)){ play(p.uci); return; }
-    ST.sel=sq; ST.msg=''; ST.cls=''; ST.arrows=[]; render(); return; }
-  if(mineAt(sq)){ ST.sel=ST.sel===sq?null:sq; ST.msg=''; ST.cls=''; ST.arrows=[]; render(); }
+    ST.sel=sq; ST.msg=''; ST.cls=''; ST.arrows=[]; ST.wcp=null; render(); return; }
+  if(mineAt(sq)){ ST.sel=ST.sel===sq?null:sq; ST.msg=''; ST.cls=''; ST.arrows=[]; ST.wcp=null; render(); }
 });
 document.addEventListener('click',(e)=>{
   if(!O||!ST) return;
@@ -131,8 +140,8 @@ document.addEventListener('click',(e)=>{
   if(e.target.closest('#again')){ reset(); return; }
   if(ST.done||ST.busy) return;
   const p=line().plies[ST.i];
-  if(e.target.closest('#hint')){ ST.sel=p.uci.slice(0,2); ST.msg=`<span class="ic">힌트</span>표시한 기물을 움직입니다.`; if(!ST.wrong){ ST.wrong=1; ST.miss++; } render(); return; }
-  if(e.target.closest('#show')){ ST.shown++; ST.arrows=[[p.uci,GREEN]]; ST.sel=null; ST.msg=`<span class="ic">정답</span><b class="mono">${esc(p.san)}</b>${p.bad?` · 평소에는 <span class="mono">${esc(p.bad.san)}</span> 을 뒀습니다 (${p.bad.n}번).`:''} 화살표대로 두세요.`; ST.wrong=Math.max(ST.wrong,1); render(); }
+  if(e.target.closest('#hint')){ ST.sel=p.uci.slice(0,2); ST.wcp=null; ST.msg=`<span class="ic">힌트</span>표시한 기물을 움직입니다.`; if(!ST.wrong){ ST.wrong=1; ST.miss++; } render(); return; }
+  if(e.target.closest('#show')){ ST.shown++; ST.arrows=[[p.uci,GREEN]]; ST.sel=null; ST.wcp=null; ST.msg=`<span class="ic">정답</span><b class="mono">${esc(p.san)}</b>${p.bad?` · 평소에는 <span class="mono">${esc(p.bad.san)}</span> 을 뒀습니다 (${p.bad.n}번).`:''} 화살표대로 두세요.`; ST.wrong=Math.max(ST.wrong,1); render(); }
 });
 
 if(O){ document.title=`${O.name} · 오프닝 연습`; reset(); }

@@ -9,6 +9,27 @@ const PH={opening:'오프닝',middlegame:'중반',endgame:'엔드게임'};
 const gameId=(url)=> (url||'').split('/').pop();
 const RED='#e5484d', GREEN='#2fb564', BLUE='#3b82f6', GRAY='#8a8883';
 
+/* ---------- 승률과 평가 막대 (복기·퍼즐·오프닝 연습·교본 공용) ----------
+   winPct(cp): 파이프라인과 같은 식. cp 는 보는 쪽 기준. 외통(|cp|≥9000)은 100 또는 0.
+   평가 막대는 판 왼쪽에 세로로 서고, 흰 부분이 백의 승률이다. 판을 뒤집으면 막대도 뒤집는다. */
+const winPct=(cp)=>cp==null?null:Math.abs(cp)>=9000?(cp>0?100:0):50+50*(2/(1+Math.exp(-0.00368208*cp))-1);
+const wpTxt=(cp)=>cp==null?'-':`${Math.round(winPct(cp))}%`;
+const evalBarHTML=(id)=>`<div class="evalbar" id="${id}"><div class="w"></div><span></span></div>`;
+function setEvalBar(bar,cpw,flip){
+  if(!bar) return; const wEl=bar.querySelector('.w'), sp=bar.querySelector('span');
+  const wp=cpw==null?50:winPct(cpw);
+  wEl.style.height=wp+'%'; if(flip){wEl.style.top='0';wEl.style.bottom='auto';} else {wEl.style.top='auto';wEl.style.bottom='0';}
+  sp.textContent=cpw==null?'':evW(cpw).replace('+',''); const whiteAhead=(cpw||0)>=0; sp.style.color=whiteAhead?'#000':'#fff';
+  const atBottom = whiteAhead ? !flip : flip; sp.style.top=atBottom?'auto':'2px'; sp.style.bottom=atBottom?'2px':'auto';
+}
+/* 수를 둔 뒤의 승률 변화 문구. before/after 는 둔 쪽 기준 cp. after 가 없으면 빈 문자열 */
+function wpChange(before,after){
+  if(after==null) return '';
+  const d=Math.round(winPct(after)-winPct(before));
+  if(!d) return `<span class="wp">승률 <b>${wpTxt(after)}</b> 유지</span>`;
+  return `<span class="wp">승률 ${wpTxt(before)} → <b>${wpTxt(after)}</b> <i class="${d<0?'dn':'up'}">${d<0?'−':'+'}${Math.abs(d)}%p</i></span>`;
+}
+
 /* ---------- 실수 유형: 이름·설명·두기 전 규칙·체크 질문 (키는 pipeline.py 의 CAT_KEYS 와 같다) ---------- */
 const CATG={give:'기물을 내줌',blind:'상대 수를 못 봄',miss:'내 기회를 놓침',plan:'조용한 판단 실수'};
 const CATS={

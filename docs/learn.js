@@ -67,15 +67,19 @@ function blockHTML(b){
 }
 function drawTry(i){
   const t=TRY[i], b=t.b, el=document.getElementById('try'+i); if(!el) return;
-  const mv=[b.uci.slice(0,2),b.uci.slice(2,4)];
+  const mv=[b.uci.slice(0,2),b.uci.slice(2,4)], M=b.moves||{}, turn=b.fen.split(' ')[1];
+  const doneCp=t.done?(M[(t.mv||mv).join('')]??b.cp):null;      // 둔 정답(또는 같이 인정되는 수)의 값
   let m='', cls='';
-  if(t.done){ cls='ok'; m=`<span class="ic">정답</span><b class="mono">${esc(t.san||b.san)}</b> ${md(b.x)}`; }
+  if(t.done){ cls='ok'; m=`<span class="ic">정답</span><b class="mono">${esc(t.san||b.san)}</b>${doneCp!=null?` <span class="wp">승률 ${wpTxt(doneCp)}</span>`:''} ${md(b.x)}`; }
   else if(t.shown){ m=`<span class="ic">정답</span><b class="mono">${esc(b.san)}</b> 화살표대로 두어 보세요.`; }
-  else if(t.wrong){ cls='ng'; m=`<span class="ic">다시</span>${t.wrong>=2?'움직일 기물을 표시했습니다.':'더 좋은 수가 있습니다. 체크와 잡는 수부터 찾아보세요.'}`; }
-  el.innerHTML=`<span class="tag">직접 두어 보기 · ${b.fen.split(' ')[1]==='w'?'백':'흑'} 차례</span><div class="figq">${md(b.q)}</div>
-    <div class="tryb ${t.cls}">${boardSVG(t.done?t.after||b.after:b.fen,{flip:b.flip,last:t.done?(t.mv||mv):t.sel?[t.sel]:(!t.shown&&t.wrong>=2?[mv[0]]:[]),arrows:t.shown&&!t.done?[[b.uci,GREEN]]:[]})}</div>
+  else if(t.wrong){ cls='ng'; m=`<span class="ic">다시</span>${t.wrong>=2?'움직일 기물을 표시했습니다.':'더 좋은 수가 있습니다. 체크와 잡는 수부터 찾아보세요.'}${t.wcp!=null?` <span class="sub">그 수를 두면</span> ${wpChange(b.cp,t.wcp)}`:''}`; }
+  const barCp=t.done?doneCp:t.wrong&&t.wcp!=null?t.wcp:b.cp;    // 국면 평가(둘 쪽 기준) → 막대는 백 기준
+  const bar=b.cp!=null?evalBarHTML(`tryev${i}`):'';
+  el.innerHTML=`<span class="tag">직접 두어 보기 · ${turn==='w'?'백':'흑'} 차례</span><div class="figq">${md(b.q)}</div>
+    <div class="boardwrap">${bar}<div class="tryb ${t.cls}">${boardSVG(t.done?t.after||b.after:b.fen,{flip:b.flip,last:t.done?(t.mv||mv):t.sel?[t.sel]:(!t.shown&&t.wrong>=2?[mv[0]]:[]),arrows:t.shown&&!t.done?[[b.uci,GREEN]]:[]})}</div></div>
     <div class="trym ${cls}">${m||'<span class="sub">기물을 누르고 갈 칸을 누르세요.</span>'}</div>
     <div class="trya">${t.done?`<span class="btn" data-tryre="${i}">다시 풀기</span>`:`<span class="btn" data-tryshow="${i}">정답 보기</span>`}</div>`;
+  if(bar) setEvalBar(document.getElementById(`tryev${i}`), barCp==null?null:(turn==='w'?barCp:-barCp), b.flip);
   applyTheme();
 }
 function recHTML(c){
@@ -122,14 +126,14 @@ document.addEventListener('pointerdown',(e)=>{
   const turn=b.fen.split(' ')[1], mine=(s)=>{ const x=parseFen(b.fen).find(q=>q.sq===s); return x&&x.p[0]===turn; };
   if(t.sel&&sq!==t.sel&&!mine(sq)){
     const u=t.sel+sq, alt=b.ok.find(a=>a.uci.slice(0,4)===u); t.sel=null;
-    if(u===b.uci.slice(0,4)||alt){ t.done=true; t.cls=''; if(alt){ t.san=`${alt.san} (${b.san} 도 정답)`; t.after=alt.after; t.mv=[u.slice(0,2),u.slice(2,4)]; } }
-    else { t.wrong++; t.cls='ng'; }
+    if(u===b.uci.slice(0,4)||alt){ t.done=true; t.cls=''; t.wcp=null; if(alt){ t.san=`${alt.san} (${b.san} 도 정답)`; t.after=alt.after; t.mv=[u.slice(0,2),u.slice(2,4)]; } }
+    else { t.wrong++; t.cls='ng'; const m=(b.moves||{})[u]; t.wcp=(m==null||b.cp==null)?null:Math.min(m,b.cp); }
     drawTry(i); if(t.cls==='ng') setTimeout(()=>{ t.cls=''; },400); return; }
   if(mine(sq)){ t.sel=t.sel===sq?null:sq; t.cls=''; drawTry(i); }
 });
 document.addEventListener('click',(e)=>{
   const sh=e.target.closest('[data-tryshow]'); if(sh){ const t=TRY[+sh.dataset.tryshow]; t.shown=true; t.sel=null; drawTry(+sh.dataset.tryshow); return; }
-  const re=e.target.closest('[data-tryre]'); if(re){ const i=+re.dataset.tryre; Object.assign(TRY[i],{sel:null,wrong:0,done:false,shown:false,cls:'',san:null,mv:null}); drawTry(i); return; }
+  const re=e.target.closest('[data-tryre]'); if(re){ const i=+re.dataset.tryre; Object.assign(TRY[i],{sel:null,wrong:0,done:false,shown:false,cls:'',san:null,mv:null,after:null,wcp:null}); drawTry(i); return; }
   if(e.target.closest('#ldone')&&C){ DONE[C.id]=DONE[C.id]||today(); save('learn-done',DONE); const nx=CH[CH.indexOf(C)+1]; location.href=nx?url(nx.id):'learn.html'; }
 });
 

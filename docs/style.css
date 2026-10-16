@@ -74,6 +74,15 @@ header>*{max-width:720px;margin-left:auto;margin-right:auto}
 /* 보드 */
 :root[data-tex="0"] .grain{display:none}
 .board{width:100%;max-width:440px;aspect-ratio:1;display:block;margin:0 auto;border-radius:10px;overflow:hidden;touch-action:manipulation;box-shadow:0 12px 32px rgba(0,0,0,.45)}
+/* 판 왼쪽의 평가 막대 (복기·퍼즐·오프닝 연습·교본 공용) */
+.boardwrap{display:flex;gap:8px;align-items:stretch;max-width:470px;margin:0 auto}
+.evalbar{width:20px;border-radius:8px;overflow:hidden;background:#2b2a28;position:relative;flex:none}
+.evalbar .w{position:absolute;left:0;right:0;background:#f0f0f0;transition:height .25s ease}
+.evalbar span{position:absolute;left:0;right:0;text-align:center;font-size:10px;font-weight:700;font-family:ui-monospace,Menlo,monospace}
+.boardwrap .board,.boardwrap .pzboard,.boardwrap .tryb{flex:1;min-width:0;max-width:440px;margin:0}
+.wp{display:inline-block;white-space:nowrap}
+.wp i{font-style:normal;font-weight:700}
+.wp i.dn{color:var(--critical)}.wp i.up{color:var(--good)}
 :root[data-mode="light"] .board{box-shadow:0 10px 26px rgba(16,24,40,.18)}
 .viewer{margin-top:12px}
 .vctl{display:flex;gap:8px;align-items:center;justify-content:center;margin-top:12px;flex-wrap:wrap}
