@@ -303,6 +303,7 @@ def run(c, base, server, shots):
             check("장면 보기: 보드가 그려진다", c.wait("!!document.querySelector('#s-recent .viewer svg.board')", 3))
             cap0 = c.ev("document.querySelector('#s-recent .viewer .cap')?.textContent"); c.tap("#s-recent .viewer [data-go='1']")
             check("장면 보기: 다음 수로 넘어간다", cap0 != c.ev("document.querySelector('#s-recent .viewer .cap')?.textContent"))
+            check("장면 보기: 판 옆에 승률 막대", c.ev("!!document.querySelector('#s-recent .viewer .boardwrap > .evalbar + svg.board') && document.querySelector('#s-recent .viewer .evalbar span').textContent.length>0"))
             c.tap('#tabs button[data-w="7d"]', None); c.pump(0.8); v = c.ev(VIS)
             check("기간을 바꿔도 탭이 유지된다", (v and set(v) == {"games"}) or c.ev("!!document.querySelector('#main .empty')"), v)
             c.tap('#tabs button[data-w="all"]', None); c.pump(0.8)
@@ -505,6 +506,10 @@ def run(c, base, server, shots):
         rv = c.ev(LS("puzzle-review")) or {}
         check("틀린 문제가 내일 복습으로 잡힌다", p["id"] in rv and rv[p["id"]]["step"] == 0 and "복습으로 다시" in (c.ev("document.querySelector('#pzresult').innerText") or ""), rv.get(p["id"], {}).get("due"))
         check("정답 수순 뷰어가 붙는다", c.ev("!!document.querySelector('#pzresult .viewer svg.board')"))
+        vh0 = c.ev("document.querySelector('#pzresult .viewer .boardwrap > .evalbar + svg.board') && document.querySelector('#pzresult .viewer .evalbar .w').style.height")
+        c.tap("#pzresult .viewer .vtabs [data-line='1']"); c.pump(0.2); c.tap("#pzresult .viewer [data-go='1']"); c.pump(0.2)
+        vh1 = c.ev("document.querySelector('#pzresult .viewer .evalbar .w').style.height")
+        check("수순 뷰어의 막대가 수순을 따라 움직인다 (내 수 뒤 승률이 떨어진다)", vh0 and vh1 and vh0 != vh1 and "승률" in (c.ev("document.querySelector('#pzresult .viewer .cap').innerText") or ""), (vh0, vh1))
         snap("puzzle_wrong")
         hist0 = c.ev(LS("puzzle-history"))
         c.go(base + "puzzle.html" + q(), "!!document.querySelector('#pzboard svg.board')"); c.pump(0.4)

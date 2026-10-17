@@ -19,7 +19,7 @@ function setEvalBar(bar,cpw,flip){
   if(!bar) return; const wEl=bar.querySelector('.w'), sp=bar.querySelector('span');
   const wp=cpw==null?50:winPct(cpw);
   wEl.style.height=wp+'%'; if(flip){wEl.style.top='0';wEl.style.bottom='auto';} else {wEl.style.top='auto';wEl.style.bottom='0';}
-  sp.textContent=cpw==null?'':evW(cpw).replace('+',''); const whiteAhead=(cpw||0)>=0; sp.style.color=whiteAhead?'#000':'#fff';
+  sp.textContent=cpw==null?'':Math.abs(cpw)>=10000?'#':evW(cpw).replace('+',''); const whiteAhead=(cpw||0)>=0; sp.style.color=whiteAhead?'#000':'#fff';
   const atBottom = whiteAhead ? !flip : flip; sp.style.top=atBottom?'auto':'2px'; sp.style.bottom=atBottom?'2px':'auto';
 }
 /* 수를 둔 뒤의 승률 변화 문구. before/after 는 둔 쪽 기준 cp. after 가 없으면 빈 문자열 */
@@ -160,13 +160,22 @@ function viewer(spec){ const id='v'+(++vid); VIEWERS[id]={spec,line:0,idx:0}; re
 function drawViewer(id){
   const v=VIEWERS[id], el=document.getElementById(id); if(!el||!v) return;
   const line=v.spec.lines[v.line], st=line.states[v.idx];
-  let h=boardSVG(st.fen,{flip:v.spec.flip,arrows:st.arrows,last:st.last});
+  const board=boardSVG(st.fen,{flip:v.spec.flip,arrows:st.arrows,last:st.last});
+  const withBar=line.states.some(s=>s.cp!==undefined);   // 수순에 평가가 있으면 복기 화면처럼 판 왼쪽에 막대
+  let h=withBar?`<div class="boardwrap">${evalBarHTML(id+'-ev')}${board}</div>`:board;
   if(v.spec.lines.length>1) h+=`<div class="vtabs">`+v.spec.lines.map((l,i)=>`<span class="btn ${l.cls||''} ${i===v.line?'on':''}" data-v="${id}" data-line="${i}">${esc(l.label)}</span>`).join('')+`</div>`;
   h+=`<div class="cap">${st.caption||''}</div>`;
   h+=`<div class="vctl"><span class="btn nav" data-v="${id}" data-go="0">⏮</span><span class="btn nav" data-v="${id}" data-go="-1">‹</span><span class="btn nav" data-v="${id}" data-go="1">›</span><span class="btn nav" data-v="${id}" data-go="9">⏭</span></div>`;
   h+=`<div class="moves">`;
   line.states.forEach((s,i)=>{ if(i===0) return; if(s.num) h+=`<span class="num">${s.num}</span>`; h+=`<span class="${i===v.idx?'cur':''} ${s.bad?'bad':''}" data-v="${id}" data-idx="${i}">${esc(s.san)}</span>`; });
   el.innerHTML=h+`</div>`;
+  if(withBar) setEvalBar(document.getElementById(id+'-ev'), st.cp==null?null:st.cp, v.spec.flip);
+}
+/* 수순을 n수 진행한 뒤의 평가. 수순은 엔진의 최선 진행이라 평가는 그대로이고, 외통만 남은 수가 줄어든다 */
+function alongLine(cp,n){
+  if(cp==null||Math.abs(cp)<9000) return cp;
+  const m=Math.max(0,Math.round((10000-Math.abs(cp))/10)-Math.ceil(n/2));
+  return Math.sign(cp)*(10000-10*m);
 }
 document.addEventListener('click',(e)=>{
   const t=e.target.closest('[data-v]'); if(!t) return;
@@ -181,19 +190,20 @@ function drawAll(root){ (root||document).querySelectorAll('.viewer').forEach(el=
 /* 실수 국면 뷰어: 정답 수순 / 내 수와 반격 */
 function blunderViewer(w){
   const flip=w.color==='b'||w.mover==='b';
-  const start={fen:w.fen,arrows:[[w.uci,RED],[w.best_uci,GREEN]],caption:`<span style="color:${RED}">■</span> 내가 둔 수 ${esc(w.san)} &nbsp; <span style="color:${GREEN}">■</span> 정답 ${esc(w.best)}`};
+  const toW=(cp)=>cp==null?null:(w.mover==='w'?cp:-cp);   // 저장된 cp 는 둔 쪽 기준 → 막대는 백 기준
+  const start={fen:w.fen,cp:toW(w.cp_before),arrows:[[w.uci,RED],[w.best_uci,GREEN]],caption:`<span style="color:${RED}">■</span> 내가 둔 수 ${esc(w.san)} &nbsp; <span style="color:${GREEN}">■</span> 정답 ${esc(w.best)} &nbsp;·&nbsp; 승률 ${wpTxt(w.cp_before)}`};
   const lines=[]; const best=(w.best_line||[]);
   if(best.length){
     const states=[start]; let mover=w.mover, move=w.move;
-    best.forEach((s,i)=>{ states.push({fen:s.fen,san:s.san,num:mover==='w'?`${move}.`:(i===0?`${move}...`:''),last:[s.uci.slice(0,2),s.uci.slice(2,4)],
-      caption:i===0?`정답 ${esc(s.san)} 을 두면 평가 ${ev(w.cp_before)} 유지`:`정답 수순 계속 (${i+1}수째)`});
+    best.forEach((s,i)=>{ states.push({fen:s.fen,san:s.san,cp:toW(alongLine(w.cp_before,i+1)),num:mover==='w'?`${move}.`:(i===0?`${move}...`:''),last:[s.uci.slice(0,2),s.uci.slice(2,4)],
+      caption:i===0?`정답 ${esc(s.san)} 을 두면 평가 ${ev(w.cp_before)} 유지 (승률 ${wpTxt(w.cp_before)})`:`정답 수순 계속 (${i+1}수째)`});
       if(mover==='b') move++; mover=mover==='w'?'b':'w'; });
     lines.push({label:'정답 수순',cls:'green',states});
   }
   { const ref=(w.refutation||[]); const states=[start]; let mover=w.mover, move=w.move;
-    states.push({fen:w.after_fen||w.fen,san:w.san,bad:true,num:mover==='w'?`${move}.`:`${move}...`,last:[w.uci.slice(0,2),w.uci.slice(2,4)],caption:`내가 둔 ${esc(w.san)} → 평가 ${ev(w.cp_before)} 에서 ${ev(w.cp_after)} 로`});
+    states.push({fen:w.after_fen||w.fen,san:w.san,bad:true,cp:toW(w.cp_after),num:mover==='w'?`${move}.`:`${move}...`,last:[w.uci.slice(0,2),w.uci.slice(2,4)],caption:`내가 둔 ${esc(w.san)} → 평가 ${ev(w.cp_before)} 에서 ${ev(w.cp_after)} 로 (${wpChange(w.cp_before,w.cp_after)})`});
     if(mover==='b') move++; mover=mover==='w'?'b':'w';
-    ref.forEach((s,i)=>{ states.push({fen:s.fen,san:s.san,num:mover==='w'?`${move}.`:(i===0?`${move}...`:''),last:[s.uci.slice(0,2),s.uci.slice(2,4)],caption:i===0?`상대의 최선 반격 ${esc(s.san)}`:'반격 수순 계속'});
+    ref.forEach((s,i)=>{ states.push({fen:s.fen,san:s.san,cp:toW(alongLine(w.cp_after,i+1)),num:mover==='w'?`${move}.`:(i===0?`${move}...`:''),last:[s.uci.slice(0,2),s.uci.slice(2,4)],caption:i===0?`상대의 최선 반격 ${esc(s.san)}`:'반격 수순 계속'});
       if(mover==='b') move++; mover=mover==='w'?'b':'w'; });
     lines.push({label:'내 수와 반격',cls:'red',states});
   }
