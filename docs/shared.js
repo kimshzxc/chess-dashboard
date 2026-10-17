@@ -201,7 +201,7 @@ function blunderViewer(w){
     lines.push({label:'정답 수순',cls:'green',states});
   }
   { const ref=(w.refutation||[]); const states=[start]; let mover=w.mover, move=w.move;
-    states.push({fen:w.after_fen||w.fen,san:w.san,bad:true,cp:toW(w.cp_after),num:mover==='w'?`${move}.`:`${move}...`,last:[w.uci.slice(0,2),w.uci.slice(2,4)],caption:`내가 둔 ${esc(w.san)} → 평가 ${ev(w.cp_before)} 에서 ${ev(w.cp_after)} 로 (${wpChange(w.cp_before,w.cp_after)})`});
+    states.push({fen:w.after_fen||w.fen,san:w.san,bad:true,cp:toW(w.cp_after),num:mover==='w'?`${move}.`:`${move}...`,last:[w.uci.slice(0,2),w.uci.slice(2,4)],caption:`내가 둔 ${esc(w.san)} → 평가 ${ev(w.cp_before)} 에서 ${ev(w.cp_after)} 로 · ${wpChange(w.cp_before,w.cp_after)}`});
     if(mover==='b') move++; mover=mover==='w'?'b':'w';
     ref.forEach((s,i)=>{ states.push({fen:s.fen,san:s.san,cp:toW(alongLine(w.cp_after,i+1)),num:mover==='w'?`${move}.`:(i===0?`${move}...`:''),last:[s.uci.slice(0,2),s.uci.slice(2,4)],caption:i===0?`상대의 최선 반격 ${esc(s.san)}`:'반격 수순 계속'});
       if(mover==='b') move++; mover=mover==='w'?'b':'w'; });
