@@ -401,7 +401,7 @@ function endgameCard(eg){
   let h=`<div class="card endgames"><div class="sub" style="margin-bottom:6px">엔드게임 종류별 <span class="sub">· 엔드게임까지 간 ${tot}판 · 정확도는 내 엔드게임 수 기준</span></div><table><tr><th>종류</th><th class="n">판</th><th class="n">승률</th><th class="n">정확도</th><th class="n">대실수/판</th></tr>`;
   for(const r of eg){ const bal=[['ahead','앞선'],['behind','뒤진']].filter(([k])=>r[k]&&r[k].n>=2).map(([k,nm])=>`${nm} ${r[k].n}판 ${pct(r[k].score)}`).join(' · ');
     h+=`<tr><td>${esc(r.label)}${bal?`<div class="sub" style="font-size:12px">들어갈 때 ${bal}</div>`:''}</td><td class="n">${r.n}</td><td class="n">${pct(r.score)}</td><td class="n">${r.accuracy!=null?r.accuracy+'%':'-'}</td><td class="n">${r.blunders_pg}</td></tr>`; }
-  return h+`</table></div>`;
+  return h+`</table><div class="method">종류는 엔드게임에 들어간 순간(폰과 킹을 뺀 기물 가치 합이 14 이하가 된 첫 수)의 양쪽 기물 구성입니다. 폰 엔딩은 킹과 폰만, 마이너는 나이트·비숍만, 룩 엔딩은 룩만, 룩과 마이너는 룩에 나이트·비숍이 섞인 것, 퀸 엔딩은 퀸만, 퀸과 다른 기물은 퀸에 룩이나 마이너가 더 있는 것입니다. 한쪽에만 있어도 셉니다. "앞선·뒤진"은 들어갈 때 기물 가치가 1폰 넘게 차이 난 판입니다.</div></div>`;
 }
 /* 승부가 끝난 방식: 승리·패배·무승부마다 메이트/기권/시간… 비율 막대 */
 const HOW={checkmated:'메이트',resigned:'기권',timeout:'시간',abandoned:'포기',agreed:'합의',repetition:'반복',stalemate:'스테일메이트',insufficient:'기물 부족',timevsinsufficient:'시간 대 기물 부족','50move':'50수 규칙',win:'승'};
