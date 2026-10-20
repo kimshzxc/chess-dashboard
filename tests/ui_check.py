@@ -244,6 +244,9 @@ def run(c, base, server, shots):
     v = c.ev(VIS); check("홈에는 홈 섹션만 보인다", v and set(v) == {"home"}, v)
     o = c.ev(OVER); check("가로 넘침 없음 (홈)", o[0] <= o[1], o)
     check("히어로 레이팅 숫자", str(S["overview"]["rating"]) in (c.ev("document.querySelector('.herocard .big')?.textContent") or ""))
+    if S["overview"].get("wdl_w"):
+        ow = S["overview"]; sub = c.ev("document.querySelector('#subtitle').textContent")
+        check("상단 한 줄에 색별 승률과 무승부 비율", sub == f"{ow['games']}판 · 백 {ow['score_w']}% (무 {ow['wdl_w']['draw'] / ow['games_w'] * 100:.1f}%) · 흑 {ow['score_b']}% (무 {ow['wdl_b']['draw'] / ow['games_b'] * 100:.1f}%)", sub)
     r = c.rect("#rchart"); c.pump(0.2); r = c.rect("#rchart", None)
     c.touch_xy(r[0], r[1])
     check("레이팅 그래프: 누르면 값이 뜨고 손을 떼도 남는다", c.ev(TIP("rchart")), c.ev(TIP("rchart")))

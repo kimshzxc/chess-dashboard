@@ -430,7 +430,10 @@ function render(){
   $('#foot').innerHTML = `마지막 갱신 ${DATA.generated} (KST) · Stockfish 19 depth ${(DATA.meta||{}).depth||14}, 수순 depth ${(DATA.meta||{}).pv_depth||16} · 게임이 끝나면 1~2분 안에 자동 갱신<br>기물: maestro (sadsnake1, CC BY-NC-SA 4.0), cburnett (GPLv2+), merida (GPLv2+), alpha (Eric Bentzen), california (Jerry S., CC BY-NC-SA 4.0)`;
   if(!S){ $('#subtitle').textContent=''; $('#main').innerHTML='<div class="empty">이 기간에 분석된 래피드 게임이 없습니다.</div>'; return; }
   const o=S.overview, t=S.time, c=S.conversion, tc=S.tactics;
-  $('#subtitle').textContent = `${o.games}판 · 백 ${pct(o.score_w)} · 흑 ${pct(o.score_b)}`;
+  // 상단 한 줄: 색별 승률(승 + 무/2)과 무승부 비율. 길게 누르면 승·무·패 수
+  const side=(nm,sc,n,x)=>`${nm} ${pct(sc)}${x&&n?` (무 ${(x.draw/n*100).toFixed(1)}%)`:''}`;
+  $('#subtitle').textContent = `${o.games}판 · ${side('백',o.score_w,o.games_w,o.wdl_w)} · ${side('흑',o.score_b,o.games_b,o.wdl_b)}`;
+  $('#subtitle').title = o.wdl_w?`백 ${o.wdl_w.win}승 ${o.wdl_w.draw}무 ${o.wdl_w.loss}패 · 흑 ${o.wdl_b.win}승 ${o.wdl_b.draw}무 ${o.wdl_b.loss}패`:'';
   let h='';
   const rd=o.rating-o.rating_start;
   const up=rd>0, dn=rd<0; const tot=o.win+o.draw+o.loss||1;

@@ -893,6 +893,7 @@ def compute_stats(games, con=None):
         cc = Counter(g["outcome"] for g in gs)
         S["overview"][f"score_{c}"] = round((cc["W"] + 0.5 * cc["D"]) / len(gs) * 100, 1) if gs else None
         S["overview"][f"games_{c}"] = len(gs)
+        S["overview"][f"wdl_{c}"] = dict(win=cc["W"], draw=cc["D"], loss=cc["L"])
 
     # --- 시간 관리
     def clocks_at(k, who):

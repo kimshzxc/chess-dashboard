@@ -192,6 +192,13 @@ class WithDb(unittest.TestCase):
         self.assertEqual(hints, sorted(hints))            # 근거 약한 항목은 뒤에 모인다
         json.dumps(S, ensure_ascii=False)                 # 직렬화 가능해야 한다
 
+    def test_color_wdl(self):
+        o = pipeline.compute_stats(pipeline.load_games(self.con), self.con)["overview"]
+        for c in "wb":
+            w = o[f"wdl_{c}"]
+            self.assertEqual(w["win"] + w["draw"] + w["loss"], o[f"games_{c}"])
+            self.assertAlmostEqual((w["win"] + 0.5 * w["draw"]) / o[f"games_{c}"] * 100, o[f"score_{c}"], places=1)
+
     def test_metric_series_all_keys(self):
         games = pipeline.load_games(self.con)
         for key in pipeline.METRICS:
