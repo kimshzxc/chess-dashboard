@@ -108,6 +108,7 @@ header>*{max-width:720px;margin-left:auto;margin-right:auto}
 .sw svg{width:26px;height:26px}
 .sw.mode{padding:0 14px}
 .tpanel .note{font-size:12.5px;color:var(--muted);line-height:1.5}
+.tpanel textarea{width:100%;box-sizing:border-box;margin-top:8px;padding:10px;border-radius:var(--r-sm);border:1px solid var(--line2);background:var(--surface2);color:var(--text);font:inherit;font-size:13px;resize:vertical}
 /* 스켈레톤 로딩 */
 .sk{border-radius:var(--r);background:linear-gradient(90deg,var(--surface) 25%,var(--surface2) 50%,var(--surface) 75%);background-size:200% 100%;animation:shimmer 1.4s infinite}
 @keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}

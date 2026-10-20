@@ -244,6 +244,20 @@ def run(c, base, server, shots):
     v = c.ev(VIS); check("홈에는 홈 섹션만 보인다", v and set(v) == {"home"}, v)
     o = c.ev(OVER); check("가로 넘침 없음 (홈)", o[0] <= o[1], o)
     check("히어로 레이팅 숫자", str(S["overview"]["rating"]) in (c.ev("document.querySelector('.herocard .big')?.textContent") or ""))
+    # 기록 내보내기·가져오기 (테마 패널의 '기록'): 내보낸 기록을 지운 뒤 가져오면 돌아오고, 양쪽 기록은 합쳐진다
+    c.ev("localStorage.setItem('learn-done',JSON.stringify({a:'2026-01-02'})); localStorage.setItem('puzzle-history',JSON.stringify({'2026-01-01':{ok:1,n:2}})); localStorage.setItem('train-done',JSON.stringify({o1:{0:{clean:1,n:3,last:'2026-01-01'}}}))")
+    dump = c.ev("progressDump()")
+    check("기록 내보내기: 기기 기록이 담긴다", dump and dump.get("app") == "chess-dashboard" and dump["data"]["learn-done"] == {"a": "2026-01-02"} and "puzzle-history" in dump["data"], list((dump or {}).get("data", {}).keys()))
+    c.ev("localStorage.removeItem('learn-done'); localStorage.setItem('puzzle-history',JSON.stringify({'2026-01-01':{ok:2,n:5},'2026-01-03':{ok:1,n:1}})); localStorage.setItem('train-done',JSON.stringify({o1:{0:{clean:0,n:1,last:'2025-12-30'},1:{clean:1,n:1,last:'2026-01-05'}}}))")
+    summ = c.ev(f"progressLoad({json.dumps(json.dumps(dump))})")
+    merged = {k: c.ev(f"JSON.parse(localStorage.getItem('{k}')||'null')") for k in ("learn-done", "puzzle-history", "train-done")}
+    check("기록 가져오기: 지운 기록이 돌아오고 더 많은 쪽으로 합쳐진다", merged["learn-done"] == {"a": "2026-01-02"} and merged["puzzle-history"] == {"2026-01-01": {"ok": 2, "n": 5}, "2026-01-03": {"ok": 1, "n": 1}}
+          and merged["train-done"] == {"o1": {"0": {"clean": 1, "n": 3, "last": "2026-01-01"}, "1": {"clean": 1, "n": 1, "last": "2026-01-05"}}} and "교본 1장" in summ, (summ, merged))
+    check("기록 가져오기: 엉뚱한 글은 거부한다", c.ev("(()=>{try{progressLoad('{\"x\":1}'); return false}catch(e){return e.message}})()"))
+    c.tap("#tbtn"); c.pump(0.2)
+    check("테마 패널에 기록 구역", c.ev("!!document.querySelector('#tpanel #prog-save') && !!document.querySelector('#tpanel #prog-file') && document.querySelector('#progsum').textContent.includes('교본 1장')"))
+    snap("progress"); c.tap("#tbtn"); c.pump(0.2)
+    c.ev("['learn-done','puzzle-history','train-done'].forEach(k=>localStorage.removeItem(k))")
     if S.get("finish"):
         c.go(base + "index.html" + q() + "#stats", READY); c.pump(0.4); c.tap("[data-for='stats'] [data-sub='phase']"); c.pump(0.3)
         n = c.ev("document.querySelectorAll('.finish .fin').length"); tot = sum(x["n"] for k in S["finish"] for x in S["finish"][k])

@@ -117,11 +117,59 @@ function themePanel(){
   for(const [k,b] of Object.entries(BOARDS)) h+=`<span class="sw" data-board="${k}"><i><b style="background:${b.l}"></b><b style="background:${b.d}"></b><b style="background:${b.d}"></b><b style="background:${b.l}"></b></i>${b.name}</span>`;
   h+=`</div><div class="lab">기물</div><div class="row">`;
   for(const [k,n] of Object.entries(PSETS)) h+=`<span class="sw" data-pieces="${k}"><svg viewBox="0 0 100 100"><use href="#${k}-wN" width="100" height="100"/></svg>${n}</span>`;
-  return h+`</div><div class="note">체스닷컴 Neo 기물은 저작권 때문에 그대로 넣을 수 없어, 가장 비슷한 무료 세트(마에스트로)를 기본으로 씁니다. 나무 판 색은 체스닷컴 Dark Wood 판에서 추출했습니다.</div></div>`;
+  h+=`</div><div class="note">체스닷컴 Neo 기물은 저작권 때문에 그대로 넣을 수 없어, 가장 비슷한 무료 세트(마에스트로)를 기본으로 씁니다. 나무 판 색은 체스닷컴 Dark Wood 판에서 추출했습니다.</div>`;
+  h+=`<div class="lab" style="margin-top:16px">기록</div><div class="note" id="progsum">${esc(progressSummary(progressDump()))}</div>
+  <div class="row"><span class="sw mode" id="prog-save">파일로 저장</span><span class="sw mode" id="prog-copy">복사</span><label class="sw mode" for="prog-file">파일에서 가져오기</label><input type="file" id="prog-file" accept="application/json,.json,text/plain" hidden><span class="sw mode" id="prog-paste">붙여넣기</span></div>
+  <div id="prog-textbox" hidden><textarea id="prog-text" rows="3" placeholder="다른 기기에서 복사한 기록을 여기에 붙여넣으세요"></textarea><div class="row"><span class="sw mode" id="prog-load">가져오기</span></div></div>
+  <div class="note">퍼즐·교본·오프닝 연습·이번 규칙의 기록은 이 기기에만 저장됩니다. 다른 기기로 옮기려면 저장한 파일이나 복사한 글을 그 기기에서 가져오세요. 기록은 지워지지 않고 합쳐집니다.</div>`;
+  return h+`</div>`;
 }
+/* ---------- 기록 내보내기·가져오기 ----------
+   기록은 모두 localStorage 라 기기마다 따로다. 파일(또는 복사한 글)로 옮기고, 가져올 때는 양쪽을 합친다:
+   기록(퍼즐 이력·복습·본 문제·교본·라인)은 더 많은 쪽, 오늘의 퍼즐은 더 진행된 쪽, 규칙은 더 최근 것, 테마는 가져온 쪽. */
+const PROG_KEYS=['puzzle-history','puzzle-review','puzzle-seen','puzzle-day','learn-done','train-done','chess-rule','chess-theme','chess-mode'];
+const progRead=()=>{ const o={}; for(const k of PROG_KEYS){ try{ const v=localStorage.getItem(k); if(v!=null) o[k]=k==='chess-mode'?v:JSON.parse(v); }catch(e){} } return o; };
+function progressDump(){ return {app:'chess-dashboard',v:1,at:new Date().toISOString(),data:progRead()}; }
+function progressSummary(d){
+  const x=(d&&d.data)||{}, hist=x['puzzle-history']||{};
+  const days=Object.keys(hist).length, n=Object.values(hist).reduce((a,h)=>a+(h.n||0),0), ok=Object.values(hist).reduce((a,h)=>a+(h.ok||0),0);
+  const les=Object.keys(x['learn-done']||{}).length, tr=Object.values(x['train-done']||{}).reduce((a,o)=>a+Object.values(o).filter(e=>e&&e.clean).length,0);
+  return `이 기기의 기록: 퍼즐 ${days}일 ${ok}/${n} · 교본 ${les}장 읽음 · 라인 ${tr}개 완료${x['chess-rule']?' · 규칙 설정됨':''}`;
+}
+function progressMerge(cur,inc){
+  const out={...cur}, C=(k)=>cur[k]||{}, I=(k)=>inc[k]||{};
+  { const o={...C('puzzle-history')}; for(const k in I('puzzle-history')) if(!o[k]||(I('puzzle-history')[k].n||0)>(o[k].n||0)) o[k]=I('puzzle-history')[k]; out['puzzle-history']=o; }
+  { const o={...C('puzzle-seen')}; for(const k in I('puzzle-seen')) if(!o[k]||I('puzzle-seen')[k]>o[k]) o[k]=I('puzzle-seen')[k]; out['puzzle-seen']=o; }
+  { const o={...C('puzzle-review')}; for(const k in I('puzzle-review')) if(!o[k]||(I('puzzle-review')[k].step||0)>(o[k].step||0)) o[k]=I('puzzle-review')[k]; out['puzzle-review']=o; }
+  { const a=cur['puzzle-day'], b=inc['puzzle-day']; if(b&&b.date&&(!a||!a.date||a.date<b.date||(a.date===b.date&&Object.keys(b.res||{}).length>Object.keys(a.res||{}).length))) out['puzzle-day']=b; }
+  { const o={...C('learn-done')}; for(const k in I('learn-done')) if(!o[k]||I('learn-done')[k]<o[k]) o[k]=I('learn-done')[k]; out['learn-done']=o; }
+  { const o=JSON.parse(JSON.stringify(C('train-done'))); for(const oid in I('train-done')){ o[oid]=o[oid]||{}; for(const li in I('train-done')[oid]){ const a=o[oid][li], b=I('train-done')[oid][li]||{};
+      o[oid][li]=a?{clean:Math.max(a.clean||0,b.clean||0),n:Math.max(a.n||0,b.n||0),last:(a.last||'')>(b.last||'')?a.last:b.last}:b; } } out['train-done']=o; }
+  { const a=cur['chess-rule'], b=inc['chess-rule']; if(b&&b.id&&(!a||(b.since||0)>=(a.since||0))) out['chess-rule']=b; }
+  for(const k of ['chess-theme','chess-mode']) if(inc[k]!=null) out[k]=inc[k];
+  return out;
+}
+/* 가져오기. 합친 뒤의 요약 문장을 돌려주고, 형식이 아니면 예외 */
+function progressLoad(text){
+  let d; try{ d=JSON.parse(text); }catch(e){ throw new Error('기록 형식(JSON)이 아닙니다'); }
+  if(!d||typeof d!=='object'||!d.data||typeof d.data!=='object') throw new Error('이 앱의 기록 파일이 아닙니다');
+  const merged=progressMerge(progRead(),d.data);
+  for(const k of PROG_KEYS) if(merged[k]!==undefined) localStorage.setItem(k, k==='chess-mode'?String(merged[k]):JSON.stringify(merged[k]));
+  return progressSummary({data:merged});
+}
+function progNote(t){ const el=document.getElementById('progsum'); if(el) el.textContent=t; }
+function progImport(text){ try{ progNote('가져왔습니다 → '+progressLoad(text)+' · 화면을 다시 불러옵니다'); setTimeout(()=>location.reload(),900); }catch(e){ progNote('가져오지 못했습니다: '+e.message); } }
 document.addEventListener('click',(e)=>{
-  const tb=e.target.closest('#tbtn'); if(tb){ $('#tpanel').classList.toggle('open'); return; }
-  const t=e.target.closest('.sw'); if(!t) return;
+  const t=e.target.closest('#prog-save,#prog-copy,#prog-paste,#prog-load'); if(!t) return;
+  if(t.id==='prog-save'){ const s=JSON.stringify(progressDump()); const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([s],{type:'application/json'})); a.download=`chess-progress-${new Date(Date.now()+9*3600*1000).toISOString().slice(0,10)}.json`; document.body.append(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href),2000); progNote('파일로 저장했습니다. 다른 기기의 같은 화면에서 "파일에서 가져오기"로 여세요.'); }
+  else if(t.id==='prog-copy'){ const s=JSON.stringify(progressDump()); (navigator.clipboard?navigator.clipboard.writeText(s):Promise.reject()).then(()=>progNote('복사했습니다. 다른 기기의 "붙여넣기"에 넣으세요.'),()=>{ const box=$('#prog-textbox'); box.hidden=false; $('#prog-text').value=s; $('#prog-text').select(); progNote('복사 권한이 없어 글로 보여 줍니다. 전체 선택해서 복사하세요.'); }); }
+  else if(t.id==='prog-paste'){ const box=$('#prog-textbox'); box.hidden=!box.hidden; if(!box.hidden) $('#prog-text').focus(); }
+  else if(t.id==='prog-load'){ progImport($('#prog-text').value.trim()); }
+});
+document.addEventListener('change',(e)=>{ const f=e.target.id==='prog-file'&&e.target.files&&e.target.files[0]; if(!f) return; f.text().then(progImport); e.target.value=''; });
+document.addEventListener('click',(e)=>{
+  const tb=e.target.closest('#tbtn'); if(tb){ const p=$('#tpanel'); p.classList.toggle('open'); if(p.classList.contains('open')) progNote(progressSummary(progressDump())); return; }   // 열 때마다 기록 요약을 새로 센다
+  const t=e.target.closest('.sw'); if(!t||/^prog-/.test(t.id||'')||t.htmlFor) return;
   if(t.dataset.mode){ MODE=t.dataset.mode; applyMode(); return; }
   if(t.dataset.board) THEME.board=t.dataset.board; if(t.dataset.pieces) THEME.pieces=t.dataset.pieces; THEME.v=2; applyTheme();
 });
