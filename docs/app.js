@@ -394,6 +394,14 @@ function spark(evals, worstPly){
   let dot=''; if(worstPly!=null&&worstPly<n){ const p=pts[worstPly]; dot=`<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="3.5" fill="${RED}"/>`; }
   return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><line x1="0" y1="${mid}" x2="${W}" y2="${mid}" stroke="var(--line)"/><path d="${area}" fill="var(--s1)" opacity=".14"/><path d="${d}" fill="none" stroke="var(--s1)" stroke-width="1.5"/>${dot}</svg>`;
 }
+/* 승부가 끝난 방식: 승리·패배·무승부마다 메이트/기권/시간… 비율 막대 */
+const HOW={checkmated:'메이트',resigned:'기권',timeout:'시간',abandoned:'포기',agreed:'합의',repetition:'반복',stalemate:'스테일메이트',insufficient:'기물 부족',timevsinsufficient:'시간 대 기물 부족','50move':'50수 규칙',win:'승'};
+function finishCard(f){
+  if(!f) return '';
+  const row=(k,name,color)=>{ const xs=f[k]||[], n=xs.reduce((a,x)=>a+x.n,0); if(!n) return '';
+    return `<div class="fin" data-k="${k}"><div class="fh"><b style="color:${color}">${name}</b><span class="sub">${n}판</span></div><div class="fbar">${xs.map((x,i)=>`<i style="width:${x.n/n*100}%;opacity:${1-i*0.18}" title="${esc(HOW[x.how]||x.how)} ${x.n}"></i>`).join('')}</div><div class="fl">${xs.map(x=>`<span>${esc(HOW[x.how]||x.how)} <b>${x.n}</b> <small>${Math.round(x.n/n*100)}%</small></span>`).join('')}</div></div>`; };
+  return `<div class="card finish"><div class="sub" style="margin-bottom:8px">승부가 끝난 방식 <span class="sub">· 승리는 상대가 어떻게 졌는지</span></div>${row('W','승리','var(--win)')}${row('L','패배','var(--loss)')}${row('D','무승부','var(--draw)')}</div>`;
+}
 function bars(rows, max){
   let h='<div class="bars">';
   for(const r of rows){
@@ -524,7 +532,7 @@ function render(){
   h+=`<section data-view="stats" data-sub="phase"><h2>마무리와 역전</h2><div class="tiles">
     <div class="tile"><div class="k">+3 이상 유리했던 판</div><div class="v">${cw.n?Math.round(cw.won/cw.n*100):0}% 승</div><div class="d">${cw.n}판 중 ${cw.won}승 ${cw.draw}무 <b style="color:var(--loss)">${cw.lost}패</b></div></div>
     <div class="tile"><div class="k">-3 이하 불리했던 판</div><div class="v">${cl.n?Math.round(cl.won/cl.n*100):0}% 역전</div><div class="d">${cl.n}판 중 ${cl.won}승 ${cl.draw}무 ${cl.lost}패</div></div>
-  </div></section>`;
+  </div>${finishCard(S.finish)}</section>`;
   const hungRows=Object.entries(tc.hung).sort((a,b)=>b[1]-a[1]);
   h+=`<section data-view="stats" data-sub="phase"><h2>전술</h2><div class="tiles">
     <div class="tile"><div class="k">기물 방치 (한 수에 잡히는 기물)</div><div class="v">${tc.hung_total}</div><div class="d">판당 ${tc.hung_pg} · ${hungRows.map(([k,v])=>`${k} ${v}`).join(' · ')||'-'}<br>시간 1분 이상 남았을 때 ${tc.hung_with_time}회</div></div>

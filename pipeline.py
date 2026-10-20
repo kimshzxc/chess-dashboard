@@ -966,6 +966,11 @@ def compute_stats(games, con=None):
             recov[g["outcome"]] += 1
     S["conversion"] = dict(winning=dict(n=sum(conv.values()), won=conv["W"], lost=conv["L"], draw=conv["D"]),
                            losing=dict(n=sum(recov.values()), lost=recov["L"], won=recov["W"], draw=recov["D"]))
+    # 승부가 끝난 방식: 이겼으면 상대의 결과(체크메이트당함·기권·포기·시간), 졌거나 비겼으면 내 결과. 많은 순
+    fin = {"W": Counter(), "L": Counter(), "D": Counter()}
+    for g in games:
+        fin[g["outcome"]][g["opp_result"] if g["outcome"] == "W" else g["my_result"]] += 1
+    S["finish"] = {k: [dict(how=h, n=n) for h, n in v.most_common()] for k, v in fin.items()}
 
     # --- 전술
     hung = Counter(); hung_clock = Counter()

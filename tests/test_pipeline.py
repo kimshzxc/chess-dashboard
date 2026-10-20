@@ -192,6 +192,13 @@ class WithDb(unittest.TestCase):
         self.assertEqual(hints, sorted(hints))            # 근거 약한 항목은 뒤에 모인다
         json.dumps(S, ensure_ascii=False)                 # 직렬화 가능해야 한다
 
+    def test_finish(self):
+        f = pipeline.compute_stats(pipeline.load_games(self.con), self.con)["finish"]
+        self.assertEqual(set(f), {"W", "L", "D"})
+        self.assertEqual(sum(x["n"] for k in f for x in f[k]), 24)
+        self.assertEqual([x["how"] for x in f["W"]], ["resigned"])                   # 가짜 게임: 이긴 판은 상대가 기권
+        self.assertEqual([x["how"] for x in f["L"]], ["resigned"])
+
     def test_color_wdl(self):
         o = pipeline.compute_stats(pipeline.load_games(self.con), self.con)["overview"]
         for c in "wb":
