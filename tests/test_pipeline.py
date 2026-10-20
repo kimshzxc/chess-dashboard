@@ -192,6 +192,18 @@ class WithDb(unittest.TestCase):
         self.assertEqual(hints, sorted(hints))            # 근거 약한 항목은 뒤에 모인다
         json.dumps(S, ensure_ascii=False)                 # 직렬화 가능해야 한다
 
+    def test_endgame_kind(self):
+        import chess
+        K = pipeline.endgame_kind
+        self.assertEqual(K(chess.Board("8/5k2/8/8/8/8/5K2/8 w - - 0 1")), "pawn")
+        self.assertEqual(K(chess.Board("8/5k2/8/8/8/8/5K2/4R3 w - - 0 1")), "rook")
+        self.assertEqual(K(chess.Board("8/5k2/8/8/8/8/5K2/4RB2 w - - 0 1")), "rook_minor")
+        self.assertEqual(K(chess.Board("8/5k2/8/8/8/8/5K2/4NB2 w - - 0 1")), "minor")
+        self.assertEqual(K(chess.Board("8/5k2/8/8/8/8/5K2/4Q3 w - - 0 1")), "queen")
+        self.assertEqual(K(chess.Board("8/5k2/8/8/8/8/5K2/3rQ3 w - - 0 1")), "queen_more")
+        S = pipeline.compute_stats(pipeline.load_games(self.con), self.con)
+        self.assertEqual(S["endgames"], [])                                             # 가짜 게임은 2수짜리라 엔드게임이 없다
+
     def test_finish(self):
         f = pipeline.compute_stats(pipeline.load_games(self.con), self.con)["finish"]
         self.assertEqual(set(f), {"W", "L", "D"})

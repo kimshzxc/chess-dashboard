@@ -394,6 +394,15 @@ function spark(evals, worstPly){
   let dot=''; if(worstPly!=null&&worstPly<n){ const p=pts[worstPly]; dot=`<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="3.5" fill="${RED}"/>`; }
   return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><line x1="0" y1="${mid}" x2="${W}" y2="${mid}" stroke="var(--line)"/><path d="${area}" fill="var(--s1)" opacity=".14"/><path d="${d}" fill="none" stroke="var(--s1)" stroke-width="1.5"/>${dot}</svg>`;
 }
+/* 엔드게임 종류별 성적: 엔드게임에 들어간 판을 들어갈 때의 기물 구성으로 나눈다 */
+function endgameCard(eg){
+  if(!eg||!eg.length) return '';
+  const tot=eg.reduce((a,r)=>a+r.n,0);
+  let h=`<div class="card endgames"><div class="sub" style="margin-bottom:6px">엔드게임 종류별 <span class="sub">· 엔드게임까지 간 ${tot}판 · 정확도는 내 엔드게임 수 기준</span></div><table><tr><th>종류</th><th class="n">판</th><th class="n">승률</th><th class="n">정확도</th><th class="n">대실수/판</th></tr>`;
+  for(const r of eg){ const bal=[['ahead','앞선'],['behind','뒤진']].filter(([k])=>r[k]&&r[k].n>=2).map(([k,nm])=>`${nm} ${r[k].n}판 ${pct(r[k].score)}`).join(' · ');
+    h+=`<tr><td>${esc(r.label)}${bal?`<div class="sub" style="font-size:12px">들어갈 때 ${bal}</div>`:''}</td><td class="n">${r.n}</td><td class="n">${pct(r.score)}</td><td class="n">${r.accuracy!=null?r.accuracy+'%':'-'}</td><td class="n">${r.blunders_pg}</td></tr>`; }
+  return h+`</table></div>`;
+}
 /* 승부가 끝난 방식: 승리·패배·무승부마다 메이트/기권/시간… 비율 막대 */
 const HOW={checkmated:'메이트',resigned:'기권',timeout:'시간',abandoned:'포기',agreed:'합의',repetition:'반복',stalemate:'스테일메이트',insufficient:'기물 부족',timevsinsufficient:'시간 대 기물 부족','50move':'50수 규칙',win:'승'};
 function finishCard(f){
@@ -527,6 +536,7 @@ function render(){
   for(const p of S.phase) h+=`<tr><td>${p.label}</td><td class="n">${p.moves}</td><td class="n">${p.accuracy}%</td><td class="n">${p.opp_accuracy}%</td><td class="n">${p.blunder_rate}%</td></tr>`;
   h+=`</table></div>`;
   if(S.blunder_by_move.length) h+=`<div class="card"><div class="sub" style="margin-bottom:6px">수 구간별 대실수율</div>${bars(S.blunder_by_move.map(b=>({label:b.label+'수',me:b.rate,fmt:pct})),Math.max(...S.blunder_by_move.map(b=>b.rate),1))}</div>`;
+  h+=endgameCard(S.endgames);
   h+='</section>';
   const cw=c.winning, cl=c.losing;
   h+=`<section data-view="stats" data-sub="phase"><h2>마무리와 역전</h2><div class="tiles">

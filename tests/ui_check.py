@@ -260,6 +260,8 @@ def run(c, base, server, shots):
     c.ev("['learn-done','puzzle-history','train-done'].forEach(k=>localStorage.removeItem(k))")
     if S.get("finish"):
         c.go(base + "index.html" + q() + "#stats", READY); c.pump(0.4); c.tap("[data-for='stats'] [data-sub='phase']"); c.pump(0.3)
+        if S.get("endgames"):
+            check("엔드게임 종류별 표", c.ev("document.querySelectorAll('.endgames tr').length") == len(S["endgames"]) + 1 and (S["endgames"][0]["label"] in c.ev("document.querySelector('.endgames').innerText")), len(S["endgames"]))
         n = c.ev("document.querySelectorAll('.finish .fin').length"); tot = sum(x["n"] for k in S["finish"] for x in S["finish"][k])
         check("승부가 끝난 방식 카드", n == sum(1 for k in "WLD" if S["finish"].get(k)) and tot == S["overview"]["games"] and c.ev("document.querySelectorAll('.finish .fbar i').length") == sum(len(S["finish"][k]) for k in S["finish"]), (n, tot))
         snap("finish")

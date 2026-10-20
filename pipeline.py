@@ -203,6 +203,47 @@ def phase_of(board):
     return "endgame" if tot <= 14 else "middlegame"
 
 
+ENDGAME_KINDS = {"pawn": "폰 엔딩", "minor": "마이너 엔딩", "rook": "룩 엔딩", "rook_minor": "룩과 마이너", "queen": "퀸 엔딩", "queen_more": "퀸과 다른 기물"}
+
+
+def endgame_kind(board):
+    """엔드게임 종류: 양쪽의 폰 아닌 기물만 보고 나눈다."""
+    q = sum(len(board.pieces(chess.QUEEN, c)) for c in (True, False))
+    r = sum(len(board.pieces(chess.ROOK, c)) for c in (True, False))
+    m = sum(len(board.pieces(p, c)) for p in (chess.BISHOP, chess.KNIGHT) for c in (True, False))
+    if q:
+        return "queen" if not r and not m else "queen_more"
+    if r:
+        return "rook" if not m else "rook_minor"
+    return "minor" if m else "pawn"
+
+
+def endgame_stats(games):
+    """엔드게임에 들어간 판을 종류별로: 판 수·승률·내 엔드게임 정확도·대실수, 들어갈 때 기물에서 앞섰는지(±1폰 넘게)에 따른 승률."""
+    rows = defaultdict(list)
+    for g in games:
+        first = next((p for p in g["plies"] if p["phase"] == "endgame"), None)
+        if not first:
+            continue
+        b = chess.Board(first["fen"])
+        me = chess.WHITE if g["my_color"] == "w" else chess.BLACK
+        mat = sum(PIECE_VAL[x.piece_type] * (1 if x.color == me else -1) for x in b.piece_map().values())
+        mine = [p for p in g["plies"] if p["phase"] == "endgame" and p["mine"]]
+        rows[endgame_kind(b)].append(dict(outcome=g["outcome"], wp=[p["wp_loss"] for p in mine], blunders=sum(1 for p in mine if p["loss"] >= 300),
+                                           bal="ahead" if mat > 1 else "behind" if mat < -1 else "even"))
+    out = []
+    for k, xs in rows.items():
+        c = Counter(x["outcome"] for x in xs)
+        by = {}
+        for bal in ("ahead", "even", "behind"):
+            ys = [x for x in xs if x["bal"] == bal]
+            by[bal] = dict(n=len(ys), score=_score([y["outcome"] for y in ys]))
+        out.append(dict(key=k, label=ENDGAME_KINDS[k], n=len(xs), win=c["W"], draw=c["D"], loss=c["L"], score=_score([x["outcome"] for x in xs]),
+                        accuracy=acc([w for x in xs for w in x["wp"]]), blunders_pg=round(sum(x["blunders"] for x in xs) / len(xs), 2), **by))
+    out.sort(key=lambda r: -r["n"])
+    return out
+
+
 def analyze_game(args):
     url, pgn_text, my_color, sf = args[:4]
     threads = args[4] if len(args) > 4 else 1
@@ -971,6 +1012,8 @@ def compute_stats(games, con=None):
     for g in games:
         fin[g["outcome"]][g["opp_result"] if g["outcome"] == "W" else g["my_result"]] += 1
     S["finish"] = {k: [dict(how=h, n=n) for h, n in v.most_common()] for k, v in fin.items()}
+
+    S["endgames"] = endgame_stats(games)
 
     # --- 전술
     hung = Counter(); hung_clock = Counter()
