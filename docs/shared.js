@@ -99,6 +99,7 @@ const ICON={
   sliders:'<path d="M4 6h8M16 6h4M4 12h2M10 12h10M4 18h10M18 18h2"/><circle cx="14" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="16" cy="18" r="2"/>',
   back:'<path d="M15 5l-7 7 7 7"/>',
   arrow:'<path d="M5 19 19 5M9 5h10v10"/>',
+  try:'<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13 7l4 4"/>',
 };
 const icon=(n)=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${ICON[n]}</svg>`;
 /* 하단 탭바 (세 페이지 공용). body[data-tab] 이 현재 탭 */
@@ -108,7 +109,7 @@ function tabbar(){
   return `<nav class="tabbar" id="tabbar">`+items.map(([k,n,u])=>`<a href="${u}" data-tab="${k}" class="${k===cur?'on':''}">${icon(k)}${n}</a>`).join('')+`</nav>`;
 }
 document.body.insertAdjacentHTML('beforeend',tabbar());
-{ const fb=document.getElementById('optflip'); if(fb) fb.innerHTML=icon('flip'); const ab=document.getElementById('optbest'); if(ab) ab.innerHTML=icon('arrow'); }
+{ const fb=document.getElementById('optflip'); if(fb) fb.innerHTML=icon('flip'); const ab=document.getElementById('optbest'); if(ab) ab.innerHTML=icon('arrow'); const tb=document.getElementById('opttry'); if(tb) tb.innerHTML=icon('try'); }
 { const tb=document.getElementById('tbtn'); if(tb){ tb.innerHTML=icon('sliders'); tb.setAttribute('aria-label','테마'); tb.setAttribute('role','button'); tb.title='테마'; } }
 /* 연습 탭 머리: 퍼즐 / 오프닝 연습 전환 (puzzle.html, train.html 공용) */
 const practiceNav=(cur)=>`<div class="tabs seg"><a class="${cur==='puzzle'?'on':''}" href="puzzle.html">퍼즐</a><a class="${cur==='train'?'on':''}" href="train.html">오프닝</a><a class="${cur==='learn'?'on':''}" href="learn.html">교본</a></div>`;

@@ -425,6 +425,27 @@ def run(c, base, server, shots):
     CUR = "+(document.querySelector('#strip .mv.cur')?.dataset.jump||0)"
     check("게임 페이지가 뜬다", c.go(base + f"game.html?id={gid}&ply={ply}" + q("?"), "!!document.querySelector('#board svg.board')"))
     check("주소의 ply 로 그 수에서 시작", c.ev(CUR) == ply, c.ev(CUR))
+    # 둬 보기: 현재 국면에서 아무 수나 두면 브라우저 엔진이 평가한다
+    import chess
+    brd = chess.Board(G["fens"][ply]); mvv = next(m for m in brd.legal_moves if not m.promotion); san = brd.san(mvv); u = mvv.uci()
+    c.tap("#opttry", y_target=60); c.pump(0.3)
+    check("둬 보기 켜기", c.ev("document.querySelector('#opttry').classList.contains('on')") and "둬 보기" in (c.ev("document.querySelector('#info').innerText") or ""))
+    def gsq(sq):
+        r = c.ev("(()=>{const r=document.querySelector('#board svg.board').getBoundingClientRect(); return [r.left,r.top,r.width]})()")
+        fx, ry = FILES.index(sq[0]), 8 - int(sq[1])
+        if G["my_color"] == "b":
+            fx, ry = 7 - fx, 7 - ry
+        c.tap_xy(r[0] + (fx + 0.5) * r[2] / 8, r[1] + (ry + 0.5) * r[2] / 8, settle=0.25)
+    c.ev("window.scrollTo({top:0,behavior:'instant'})"); c.pump(0.3)
+    gsq(u[:2]); dots = c.ev("document.querySelectorAll('#board svg.board > circle').length"); gsq(u[2:4]); c.pump(0.3)
+    check("둬 보기: 기물을 고르면 갈 칸이 표시되고 두면 수가 적힌다", dots == len([m for m in brd.legal_moves if m.from_square == mvv.from_square and not (m.promotion and m.promotion != chess.QUEEN)]) and san in (c.ev("document.querySelector('#info .var')?.innerText") or ""), (dots, san, c.ev("document.querySelector('#info .var')?.innerText")))
+    got = c.wait("(()=>{const t=document.querySelector('#info').innerText; return t.includes('평가 ')||t.includes('엔진을 쓸 수 없습니다')||t.includes('입니다.')?t:''})()", 40)
+    check("둬 보기: 브라우저 엔진이 평가를 낸다", got and "평가 " in got and c.ev("document.querySelector('#evalbar span').textContent.length>0"), (got or "")[:80])
+    c.tap("#vundo", y_target=640); c.pump(0.3)
+    check("둬 보기: 한 수 무르기", not c.ev("document.querySelector('#info .var')") and c.ev("document.querySelector('#vundo').hasAttribute('disabled')"))
+    c.tap("#vclose", y_target=640); c.pump(0.3)
+    check("둬 보기 끝", not c.ev("document.querySelector('#opttry').classList.contains('on')") and c.ev(CUR) == ply and "둬 보기" not in (c.ev("document.querySelector('#info').innerText") or ""))
+    errs = c.errors(); check("둬 보기에서 오류 없음", not errs, errs[:3])
     o = c.ev(OVER); check("가로 넘침 없음 (게임)", o[0] <= o[1], o)
     c.pump(1.5)
     s = c.ev("(()=>{const st=document.querySelector('#strip'),m=st.querySelector('.mv.cur'); const a=st.getBoundingClientRect(), b=m.getBoundingClientRect(); return [a.left,a.right,b.left,b.right]})()")

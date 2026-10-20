@@ -1,10 +1,59 @@
-/* 게임 상세 페이지. shared.js 다음에 module 로 로드된다. */
+/* 게임 상세 페이지. shared.js, engine.js 다음에 module 로 로드된다. */
+import {Chess} from './vendor/chess.js';
 document.body.insertAdjacentHTML('afterbegin', await fetch('pieces.svg').then(r=>r.text()));
 $('#tpanel-slot').innerHTML=themePanel(); applyMode();
 $('#backbtn').innerHTML=icon('back')+'게임';
 const params=new URLSearchParams(location.search);
 const ID=params.get('id'); let G=null, IDX=0, FLIP=false, SHOW_BEST=true;
 let COACH=null;   // coach.json: 전체 기간의 집중 과제와 유형별 최근 빈도 (없어도 페이지는 동작한다)
+/* 둬 보기: 현재 국면(IDX)에서 아무 수나 둬 보고 브라우저 엔진(engine.js)의 평가를 본다.
+   VAR = 둬 본 수 [{san, uci, fen}], VSEL = 고른 칸, VRES = 마지막 국면의 엔진 결과, VTHINK = 분석 중, VERR = 엔진 오류 문구 */
+let TRY=false, VAR=[], VSEL=null, VRES=null, VTHINK=false, VERR=null;
+const curFen=()=>VAR.length?VAR[VAR.length-1].fen:G.fens[IDX];
+const sanOf=(fen,uci)=>{ try{ const ch=new Chess(fen); const m=ch.move({from:uci.slice(0,2),to:uci.slice(2,4),promotion:uci[4]||undefined}); return m?m.san:uci; }catch(e){ return uci; } };
+const pvSan=(fen,pv)=>{ const ch=new Chess(fen), out=[]; for(const u of pv){ try{ const m=ch.move({from:u.slice(0,2),to:u.slice(2,4),promotion:u[4]||undefined}); if(!m) break; out.push(m.san); }catch(e){ break; } } return out.join(' '); };
+function squareAt(svg,e){ const r=svg.getBoundingClientRect(); let fx=Math.floor((e.clientX-r.left)/r.width*8), ry=Math.floor((e.clientY-r.top)/r.height*8); if(fx<0||fx>7||ry<0||ry>7) return null; if(FLIP){ fx=7-fx; ry=7-ry; } return FILES[fx]+(8-ry); }
+function tryMove(from,to){
+  const ch=new Chess(curFen()); let m=null;
+  try{ m=ch.move({from,to,promotion:'q'}); }catch(e){ m=null; }   // 승격은 퀸으로
+  if(!m) return false;
+  VAR.push({san:m.san,uci:from+to+(m.promotion||''),fen:ch.fen()}); VSEL=null; VRES=null; think(); return true;
+}
+async function think(){
+  const fen=curFen(), ch=new Chess(fen);
+  if(ch.isGameOver()){ VRES={cp:ch.isCheckmate()?(ch.turn()==='w'?-10000:10000):0,pv:[],best:null,depth:0,over:ch.isCheckmate()?'외통':'무승부'}; VTHINK=false; draw(); return; }
+  VTHINK=true; draw();
+  try{ const r=await Engine.analyse(fen,{depth:14,movetime:2500}); if(r.stale) return; VRES=r; VERR=null; }
+  catch(e){ VERR=(e&&e.message)||'엔진 오류'; }
+  VTHINK=false; draw();
+}
+function setTry(on){
+  TRY=on; VAR=[]; VSEL=null; VRES=null; VTHINK=false; $('#opttry').classList.toggle('on',on); $('#board').classList.toggle('try',on);
+  if(on) Engine.start().catch(e=>{ VERR=(e&&e.message)||'엔진 오류'; draw(); });
+  draw();
+}
+function tryInfo(){
+  const base=IDX, startFen=G.fens[base], fen=curFen();
+  let h=`<div><b>둬 보기</b> <span class="sub">${VAR.length?'· 계속 둘 수 있습니다':'· 기물을 누르고 갈 칸을 누르세요. 양쪽 다 둘 수 있습니다.'}</span></div>`;
+  if(VAR.length){
+    let mv=+startFen.split(' ')[5], w=startFen.split(' ')[1]==='w', s='';
+    VAR.forEach((v,i)=>{ s+=(w?`${mv}. `:(i===0?`${mv}... `:''))+v.san+' '; if(!w) mv++; w=!w; });
+    h+=`<div class="var"><span class="mono">${esc(s.trim())}</span></div>`;
+    if(VRES&&VRES.over) h+=`<div>${VRES.over}입니다.</div>`;
+    else if(VRES&&VRES.cp!=null){
+      const me=G.my_color==='w'?VRES.cp:-VRES.cp;
+      h+=`<div>평가 <b>${evW(VRES.cp)}</b> <span class="sub">(내 승률 ${wpTxt(me)}${VRES.depth?` · 깊이 ${VRES.depth}`:''})</span>${VRES.best?` · 엔진 추천 <b class="mono">${esc(sanOf(fen,VRES.best))}</b>${SHOW_BEST?' <span class="sub">(초록 화살표)</span>':''}`:''}</div>`;
+      if(VRES.pv&&VRES.pv.length>1) h+=`<div class="sub">추천 수순: <span class="mono">${esc(pvSan(fen,VRES.pv.slice(0,6)))}</span></div>`;
+      const real=G.plies[base];
+      if(real&&VAR.length===1&&real.uci.slice(0,4)!==VAR[0].uci.slice(0,4)) h+=`<div class="sub">실제로는 <b class="mono">${esc(real.san)}</b> 을 뒀고 그 뒤 평가는 ${evW(real.cp_w)} 였습니다.</div>`;
+    }
+    else if(VTHINK) h+=`<div class="sub">엔진이 생각하는 중…</div>`;
+    else if(VERR) h+=`<div class="sub">브라우저 엔진을 쓸 수 없습니다 (${esc(VERR)}). 수는 둘 수 있지만 평가는 나오지 않습니다.</div>`;
+  } else if(VERR) h+=`<div class="sub">브라우저 엔진을 쓸 수 없습니다 (${esc(VERR)}).</div>`;
+  h+=`<div class="acts2"><span class="btn" id="vundo"${VAR.length?'':' disabled'}>한 수 무르기</span><span class="btn" id="vreset"${VAR.length?'':' disabled'}>처음으로</span><span class="btn" id="vclose">둬 보기 끝</span></div>`;
+  h+=`<div class="sub" style="margin-top:6px">브라우저용 스톡피시 19 라이트(1.7MB)로 계산합니다. 저장된 분석(depth ${G.depth||18})보다 얕고 수치가 조금 다를 수 있습니다.</div>`;
+  return h;
+}
 const CLS={best:['최선','best'],good:['좋음','good'],inacc:['부정확','inacc'],mist:['실수','mist'],blun:['대실수','blun'],miss:['외통 놓침','blun']};
 const CLSCOLOR={best:'var(--c-best)',good:'var(--c-good)',inacc:'var(--c-inacc)',mist:'var(--c-mist)',blun:'var(--c-blun)',miss:'var(--c-blun)'};
 
@@ -113,13 +162,21 @@ function graphSVG(){
   return `<svg class="graph" id="graph" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><rect width="${W}" height="${H}" fill="#403d39"/><path d="${area}" fill="#f0f0f0"/><path d="M0 ${mid} L${W} ${mid}" stroke="#888" stroke-width=".5"/>${marks}<line id="gcur" x1="0" y1="0" x2="0" y2="${H}" stroke="#2a78d6" stroke-width="1.5"/></svg>`;
 }
 function draw(){
-  const n=G.plies.length; const fen=G.fens[IDX]; const p=IDX>0?G.plies[IDX-1]:null; const nx=IDX<n?G.plies[IDX]:null;
-  const arrows=[];
-  if(SHOW_BEST){ if(p&&p.cls!=='best'&&p.cls!=='good'&&p.best_uci) arrows.push([p.best_uci,GREEN]); else if(nx&&nx.best_uci) arrows.push([nx.best_uci,GREEN]); }
-  $('#board').innerHTML=boardSVG(fen,{flip:FLIP,arrows,last:p?[p.uci.slice(0,2),p.uci.slice(2,4)]:[]});
-  setEvalBar($('#evalbar'), p?p.cp_w:0, FLIP);
+  const n=G.plies.length; const inVar=TRY&&VAR.length>0; const fen=inVar?VAR[VAR.length-1].fen:G.fens[IDX]; const p=IDX>0?G.plies[IDX-1]:null; const nx=IDX<n?G.plies[IDX]:null;
+  const arrows=[]; let last=p?[p.uci.slice(0,2),p.uci.slice(2,4)]:[];
+  if(inVar){ const v=VAR[VAR.length-1]; last=[v.uci.slice(0,2),v.uci.slice(2,4)]; if(SHOW_BEST&&VRES&&VRES.best&&!VRES.over) arrows.push([VRES.best,GREEN]); }
+  else if(SHOW_BEST){ if(p&&p.cls!=='best'&&p.cls!=='good'&&p.best_uci) arrows.push([p.best_uci,GREEN]); else if(nx&&nx.best_uci) arrows.push([nx.best_uci,GREEN]); }
+  if(TRY&&VSEL) last=[VSEL];
+  $('#board').innerHTML=boardSVG(fen,{flip:FLIP,arrows,last});
+  if(TRY&&VSEL){   // 고른 기물이 갈 수 있는 칸: 빈 칸은 점, 잡는 칸은 고리 (퍼즐과 같은 표시)
+    const ch=new Chess(fen); let d='';
+    for(const m of ch.moves({square:VSEL,verbose:true})){ const [x,y]=sqXY(m.to,FLIP); d+=m.captured?`<circle cx="${x+50}" cy="${y+50}" r="44" fill="none" stroke="rgba(0,0,0,.26)" stroke-width="9"/>`:`<circle cx="${x+50}" cy="${y+50}" r="15" fill="rgba(0,0,0,.26)"/>`; }
+    $('#board svg').insertAdjacentHTML('beforeend',d);
+  }
+  setEvalBar($('#evalbar'), inVar?(VRES?VRES.cp:null):(p?p.cp_w:0), FLIP);
   let info='';
-  if(!p) info=`<b>시작 국면</b> · › 버튼, 판 스와이프, 수 목록, 그래프로 이동` + (nx&&SHOW_BEST?`<div class="sub">초록 화살표: 이 국면의 엔진 추천 ${esc(nx.best)}</div>`:'');
+  if(TRY) info=tryInfo();
+  else if(!p) info=`<b>시작 국면</b> · › 버튼, 판 스와이프, 수 목록, 그래프로 이동` + (nx&&SHOW_BEST?`<div class="sub">초록 화살표: 이 국면의 엔진 추천 ${esc(nx.best)}</div>`:'');
   else {
     const who=p.mine?'나':'상대'; const c=CLS[p.cls];
     info=`<div><span class="cls ${c[1]}">${c[0]}</span> <b>${mv(p)}</b> <span class="sub">(${who}) · 평가 ${ev(p.cp_before)} → ${ev(p.cp_after)}${p.wp_loss?` · 승률 −${p.wp_loss}%p`:''}</span></div>`;
@@ -138,9 +195,20 @@ function draw(){
   const cc=$('#ccur'); if(cc&&CLK){ const X=(CLK.L+IDX/CLK.n*CLK.pw).toFixed(1); cc.setAttribute('x1',X); cc.setAttribute('x2',X); }
   applyTheme();
 }
-function go(i){ IDX=Math.max(0,Math.min(G.plies.length,i)); draw(); }
+function go(i){ IDX=Math.max(0,Math.min(G.plies.length,i)); VAR=[]; VSEL=null; VRES=null; VTHINK=false; draw(); }
+document.addEventListener('pointerdown',(e)=>{
+  if(!G||!TRY) return; const svg=e.target.closest('#board svg.board'); if(!svg) return;
+  const sq=squareAt(svg,e); if(!sq) return;
+  if(VSEL&&sq!==VSEL&&tryMove(VSEL,sq)){ draw(); return; }
+  const ch=new Chess(curFen()), pc=ch.get(sq);
+  VSEL=(pc&&pc.color===ch.turn()&&VSEL!==sq)?sq:null; draw();
+});
 document.addEventListener('click',(e)=>{
   if(!G) return;
+  if(e.target.closest('#opttry')){ setTry(!TRY); return; }
+  if(e.target.closest('#vclose')){ setTry(false); return; }
+  if(e.target.closest('#vundo')){ VAR.pop(); VSEL=null; VRES=null; if(VAR.length) think(); else { VTHINK=false; draw(); } return; }
+  if(e.target.closest('#vreset')){ VAR=[]; VSEL=null; VRES=null; VTHINK=false; draw(); return; }
   const j=e.target.closest('[data-jump]'); if(j){ go(+j.dataset.jump); return; }
   const nv=e.target.closest('[data-go]'); if(nv){ const g=+nv.dataset.go; go(g===0?0:g===9?G.plies.length:IDX+g); return; }
   if(e.target.closest('#optbest')){ SHOW_BEST=!SHOW_BEST; $('#optbest').classList.toggle('on',SHOW_BEST); draw(); return; }
@@ -149,5 +217,5 @@ document.addEventListener('click',(e)=>{
 });
 document.addEventListener('keydown',(e)=>{ if(!G) return; if(e.key==='ArrowLeft') go(IDX-1); else if(e.key==='ArrowRight') go(IDX+1); else if(e.key==='Home') go(0); else if(e.key==='End') go(G.plies.length); });
 let tx=null; document.addEventListener('touchstart',e=>{ if(e.target.closest('.board')) tx=e.touches[0].clientX; },{passive:true});
-document.addEventListener('touchend',e=>{ if(tx==null) return; const dx=e.changedTouches[0].clientX-tx; tx=null; if(Math.abs(dx)>40) go(IDX+(dx<0?1:-1)); },{passive:true});
+document.addEventListener('touchend',e=>{ if(tx==null) return; const dx=e.changedTouches[0].clientX-tx; tx=null; if(TRY) return; if(Math.abs(dx)>40) go(IDX+(dx<0?1:-1)); },{passive:true});
 load();
