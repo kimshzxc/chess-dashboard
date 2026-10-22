@@ -100,6 +100,9 @@ def db():
     if "depth" not in cols:
         con.execute("ALTER TABLE games ADD COLUMN depth INTEGER")
         con.commit()
+    if "rated" not in cols:   # 1 = 레이팅 대국. 친선(비공식) 대국은 통계에서 뺀다 (purge_unrated 가 한 번 정리한다)
+        con.execute("ALTER TABLE games ADD COLUMN rated INTEGER")
+        con.commit()
     return con
 
 
@@ -146,7 +149,7 @@ def fetch_new_games(con, cfg, quick=False):
     new = []
     for arch in archives[-2:]:  # 이번 달 + 지난 달
         for g in http_json(arch, cfg)["games"]:
-            if g.get("time_class") != "rapid" or g.get("rules") != "chess":
+            if g.get("time_class") != "rapid" or g.get("rules") != "chess" or not g.get("rated"):   # 친선 대국은 받지 않는다
                 continue
             if g["url"] in known or "pgn" not in g:
                 continue
@@ -164,14 +167,41 @@ def fetch_new_games(con, cfg, quick=False):
                        opp=g[opp]["username"], opp_elo=g[opp]["rating"], my_elo=g[side]["rating"],
                        result=hdr.get("Result"), outcome=outcome, my_result=r, opp_result=g[opp]["result"],
                        termination=hdr.get("Termination"), eco=hdr.get("ECO"), eco_name=eco_name,
-                       time_control=g.get("time_control"), pgn=g["pgn"])
+                       time_control=g.get("time_control"), pgn=g["pgn"], rated=1)
             con.execute("INSERT INTO games(url,end_time,date,my_color,white,black,welo,belo,opp,opp_elo,my_elo,"
-                        "result,outcome,my_result,opp_result,termination,eco,eco_name,time_control,pgn) "
+                        "result,outcome,my_result,opp_result,termination,eco,eco_name,time_control,pgn,rated) "
                         "VALUES(:url,:end_time,:date,:my_color,:white,:black,:welo,:belo,:opp,:opp_elo,:my_elo,"
-                        ":result,:outcome,:my_result,:opp_result,:termination,:eco,:eco_name,:time_control,:pgn)", row)
+                        ":result,:outcome,:my_result,:opp_result,:termination,:eco,:eco_name,:time_control,:pgn,:rated)", row)
             new.append(row["url"])
     con.commit()
     return new
+
+
+def purge_unrated(con, cfg, fetch=http_json):
+    """예전에 받아 둔 친선(비공식) 대국을 한 번 정리한다: 전체 월간 기보에서 rated 가 아닌 판을 찾아 DB 와 게임 상세 JSON 에서 지운다.
+    지운 판 수를 돌려준다. 끝나면 meta 에 표시해 다시 하지 않는다."""
+    if meta_get(con, "unrated_purged") == "1":
+        return 0
+    me = cfg["CHESSCOM_USERNAME"].lower()
+    unrated = set()
+    for arch in fetch(f"https://api.chess.com/pub/player/{me}/games/archives", cfg)["archives"]:
+        for g in fetch(arch, cfg)["games"]:
+            if g.get("time_class") == "rapid" and g.get("rules") == "chess" and not g.get("rated"):
+                unrated.add(g["url"])
+    known = {r[0] for r in con.execute("SELECT url FROM games")}
+    gone = sorted(unrated & known)
+    for url in gone:
+        con.execute("DELETE FROM plies WHERE url=?", (url,))
+        con.execute("DELETE FROM games WHERE url=?", (url,))
+        p = os.path.join(DOCS, "games", f"{game_id(url)}.json")
+        if os.path.exists(p):
+            os.remove(p)
+    con.execute("UPDATE games SET rated=1 WHERE rated IS NULL")
+    con.commit()
+    meta_set(con, "unrated_purged", "1")
+    if gone:
+        log(f"친선 대국 {len(gone)}판을 통계에서 뺐습니다")
+    return len(gone)
 
 
 # ---------------------------------------------------------------- engine analysis
@@ -2270,7 +2300,7 @@ def main():
         log("이전 실행이 아직 진행 중이라 건너뜁니다")
         return
     con = db()
-    new_done = []
+    new_done, purged = [], 0
     if not a.render_only:
         try:
             new = fetch_new_games(con, cfg, quick=a.quick)
@@ -2279,6 +2309,10 @@ def main():
             new = []
         if new:
             log(f"새 래피드 게임 {len(new)}판")
+        try:
+            purged = purge_unrated(con, cfg)
+        except Exception as e:
+            log(f"친선 대국 정리 실패: {e}")
         new_done = analyze_pending(con, cfg)
     # 실수 국면의 수순·복수 정답. 밀린 것이 있으면 한 번에 LINES_BATCH 개씩, 최근 게임부터.
     lines_n, lines_urls = 0, set()
@@ -2310,7 +2344,7 @@ def main():
     pending_notify = [dict(r) for r in con.execute("SELECT * FROM games WHERE analyzed=1 AND notified=0")]
     if code_changed:
         log("코드가 바뀌어 통계를 다시 만듭니다")
-    rendered = bool(new_done or lines_n or book_n or moves_n or a.render_only or code_changed or not os.path.exists(index))
+    rendered = bool(new_done or lines_n or book_n or moves_n or purged or a.render_only or code_changed or not os.path.exists(index))
     if rendered:
         # 수순이 새로 계산된 게임의 상세 JSON 은 다시 내보낸다
         for url in set(new_done) | lines_urls:

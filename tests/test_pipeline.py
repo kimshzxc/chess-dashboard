@@ -192,6 +192,22 @@ class WithDb(unittest.TestCase):
         self.assertEqual(hints, sorted(hints))            # 근거 약한 항목은 뒤에 모인다
         json.dumps(S, ensure_ascii=False)                 # 직렬화 가능해야 한다
 
+    def test_purge_unrated(self):
+        """친선 대국은 받지 않고, 예전에 받아 둔 것은 한 번 정리한다."""
+        urls = [r[0] for r in self.con.execute("SELECT url FROM games ORDER BY end_time")]
+        arch = {"archives": ["a1"]}
+        games = {"games": [dict(url=urls[0], time_class="rapid", rules="chess", rated=False), dict(url=urls[1], time_class="rapid", rules="chess", rated=True),
+                           dict(url="x", time_class="blitz", rules="chess", rated=False)]}
+        fetch = lambda url, cfg: arch if url.endswith("/archives") else games
+        pipeline.export_missing_games(self.con)
+        self.assertTrue(os.path.exists(os.path.join(pipeline.DOCS, "games", pipeline.game_id(urls[0]) + ".json")))
+        self.assertEqual(pipeline.purge_unrated(self.con, dict(CHESSCOM_USERNAME="me"), fetch), 1)
+        self.assertEqual(self.con.execute("SELECT COUNT(*) FROM games").fetchone()[0], 23)
+        self.assertEqual(self.con.execute("SELECT COUNT(*) FROM plies WHERE url=?", (urls[0],)).fetchone()[0], 0)
+        self.assertFalse(os.path.exists(os.path.join(pipeline.DOCS, "games", pipeline.game_id(urls[0]) + ".json")))
+        self.assertEqual(self.con.execute("SELECT COUNT(*) FROM games WHERE rated=1").fetchone()[0], 23)
+        self.assertEqual(pipeline.purge_unrated(self.con, dict(CHESSCOM_USERNAME="me"), lambda *a: (_ for _ in ()).throw(AssertionError("다시 받으면 안 된다"))), 0)
+
     def test_endgame_kind(self):
         import chess
         K = pipeline.endgame_kind

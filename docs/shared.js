@@ -85,7 +85,7 @@ function applyTheme(){
 let MODE='dark'; try{ MODE=localStorage.getItem('chess-mode')||'dark'; }catch(e){}
 function applyMode(){
   if(MODE==='light') document.documentElement.dataset.mode='light'; else delete document.documentElement.dataset.mode;
-  const m=document.querySelector('meta[name="theme-color"]'); if(m) m.content=MODE==='light'?'#f4f5f7':'#0e1014';
+  const m=document.querySelector('meta[name="theme-color"]'); if(m) m.content=MODE==='light'?'#f4f5f7':'#262421';
   document.querySelectorAll('.sw[data-mode]').forEach(x=>x.classList.toggle('on',x.dataset.mode===MODE));
   try{localStorage.setItem('chess-mode',MODE)}catch(e){}
 }

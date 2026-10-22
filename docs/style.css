@@ -1,17 +1,18 @@
 /* ---------- 디자인 토큰: 기본은 짙은 톤, data-mode="light" 로 밝은 톤 ---------- */
 :root{
   color-scheme:dark;
-  --bg:#0e1014;--bg2:#13161c;--surface:#181c23;--surface2:#1f242d;--line:#262c36;--line2:#303744;
-  --text:#f3f4f6;--text2:#aeb4bf;--muted:#6f7684;
-  --me:#5b9bff;--me-ink:#7fb3ff;--me-soft:rgba(91,155,255,.16);--opp:#ff8a4c;
-  --s1:#4a90f0;--s2:#e0662e;   /* 차트 계열색 (나, 상대). 강조색보다 한 단계 어둡게: 짙은 바탕에서 검증기 통과 */
-  --good:#3ad07f;--warning:#f3c247;--serious:#ff8a4c;--critical:#ff5c5c;
-  --win:#3ad07f;--loss:#ff5c5c;--draw:#8a92a0;
+  /* 체스닷컴풍: 따뜻한 짙은 회색 바탕에 초록 강조 */
+  --bg:#262421;--bg2:#2b2926;--surface:#312e2b;--surface2:#3c3936;--line:#3e3b37;--line2:#4b4743;
+  --text:#f1efec;--text2:#bdb9b3;--muted:#8c8882;
+  --me:#81b64c;--me-ink:#a3d160;--me-soft:rgba(129,182,76,.18);--opp:#f0a04b;
+  --s1:#81b64c;--s2:#e58a3a;   /* 차트 계열색 (나, 상대) */
+  --good:#81b64c;--warning:#f3c247;--serious:#f0863a;--critical:#fa412d;
+  --win:#81b64c;--loss:#fa412d;--draw:#8c8882;
   --sq-l:#C8AA77;--sq-d:#815A37;--sq-hl:rgba(255,255,51,.5);
   --c-best:#81b64c;--c-good:#96af8b;--c-inacc:#f7c631;--c-mist:#ffa459;--c-blun:#fa412d;
-  --r:16px;--r-sm:12px;
-  --shadow:0 1px 0 rgba(255,255,255,.035) inset,0 10px 30px rgba(0,0,0,.35);
-  --shadow-sm:0 1px 0 rgba(255,255,255,.03) inset,0 2px 8px rgba(0,0,0,.25);
+  --r:12px;--r-sm:10px;
+  --shadow:0 8px 24px rgba(0,0,0,.28);
+  --shadow-sm:0 1px 2px rgba(0,0,0,.2);
   --tabbar:calc(62px + env(safe-area-inset-bottom,0px));
   --font:"Pretendard Variable",Pretendard,-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Noto Sans KR",system-ui,sans-serif;
 }
@@ -19,10 +20,10 @@
   color-scheme:light;
   --bg:#f4f5f7;--bg2:#eef0f3;--surface:#ffffff;--surface2:#f6f7f9;--line:#e5e8ee;--line2:#d9dee6;
   --text:#14171c;--text2:#4b5361;--muted:#8a92a0;
-  --me:#2a6ef5;--me-ink:#2a6ef5;--me-soft:rgba(42,110,245,.12);--opp:#f07a3a;
-  --s1:#2a6ef5;--s2:#de5f24;
-  --good:#1db860;--warning:#d9a400;--serious:#f07a3a;--critical:#e03b3b;
-  --win:#1db860;--loss:#e03b3b;--draw:#8a92a0;
+  --me:#5d9948;--me-ink:#4e8a3c;--me-soft:rgba(93,153,72,.14);--opp:#f07a3a;
+  --s1:#5d9948;--s2:#de5f24;
+  --good:#5d9948;--warning:#d9a400;--serious:#f07a3a;--critical:#e03b3b;
+  --win:#5d9948;--loss:#e03b3b;--draw:#8a92a0;
   --shadow:0 1px 2px rgba(16,24,40,.04),0 10px 30px rgba(16,24,40,.07);
   --shadow-sm:0 1px 2px rgba(16,24,40,.05);
 }
@@ -59,7 +60,8 @@ header>*{max-width:720px;margin-left:auto;margin-right:auto}
 /* 버튼 */
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:42px;padding:0 16px;border:1px solid var(--line2);border-radius:var(--r-sm);background:var(--surface2);color:var(--text);font-size:14.5px;font-weight:600;cursor:pointer;user-select:none;-webkit-tap-highlight-color:transparent;white-space:nowrap;transition:transform .12s ease,background .15s ease,border-color .15s ease}
 .btn:active{transform:scale(.96)}
-.btn.on{background:linear-gradient(180deg,color-mix(in srgb,var(--me) 92%,white) 0%,var(--me) 100%);color:#fff;border-color:transparent;box-shadow:0 4px 14px color-mix(in srgb,var(--me) 40%,transparent)}
+.btn.on{background:var(--me);color:#fff;border-color:transparent;box-shadow:0 3px 0 color-mix(in srgb,var(--me) 60%,black)}
+.btn.on:active{transform:translateY(2px);box-shadow:0 1px 0 color-mix(in srgb,var(--me) 60%,black)}
 .btn.red{border-color:var(--critical);color:var(--critical)}.btn.red.on{background:var(--critical);color:#fff;box-shadow:none}
 .btn.green{border-color:var(--good);color:var(--good)}.btn.green.on{background:var(--good);color:#0a1a10;box-shadow:none}
 .btn svg{width:18px;height:18px}
@@ -73,7 +75,7 @@ header>*{max-width:720px;margin-left:auto;margin-right:auto}
 .tabbar a:active{background:var(--surface2)}
 /* 보드 */
 :root[data-tex="0"] .grain{display:none}
-.board{width:100%;max-width:440px;aspect-ratio:1;display:block;margin:0 auto;border-radius:10px;overflow:hidden;touch-action:manipulation;box-shadow:0 12px 32px rgba(0,0,0,.45)}
+.board{width:100%;max-width:440px;aspect-ratio:1;display:block;margin:0 auto;border-radius:6px;overflow:hidden;touch-action:manipulation;box-shadow:0 8px 24px rgba(0,0,0,.35)}
 /* 판 왼쪽의 평가 막대 (복기·퍼즐·오프닝 연습·교본 공용) */
 .boardwrap{display:flex;gap:8px;align-items:stretch;max-width:470px;margin:0 auto}
 .evalbar{width:20px;border-radius:8px;overflow:hidden;background:#2b2a28;position:relative;flex:none}
@@ -140,7 +142,7 @@ main>section{animation:fade .25s ease both}
 /* 공용: 구획 전환(세그먼트), 아이콘 버튼 */
 .tabs{display:flex;gap:2px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:4px}
 .tabs button,.tabs a{flex:1;display:flex;align-items:center;justify-content:center;min-height:38px;padding:0 6px;border:0;background:transparent;color:var(--text2);border-radius:10px;font-size:14.5px;font-weight:600;-webkit-tap-highlight-color:transparent;transition:background .15s,color .15s;white-space:nowrap;cursor:pointer}
-.tabs button.on,.tabs a.on{background:var(--surface2);color:var(--text);box-shadow:var(--shadow-sm);outline:1px solid var(--line2)}
+.tabs button.on,.tabs a.on{background:var(--surface2);color:var(--text);box-shadow:none;outline:1px solid var(--line2)}
 .tbtn,#tbtn{width:42px;padding:0;flex:none}
 .ptop{display:flex;justify-content:space-between;align-items:center;gap:10px}
 .ptop h1{margin:0}
