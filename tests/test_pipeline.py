@@ -220,6 +220,38 @@ class WithDb(unittest.TestCase):
         S = pipeline.compute_stats(pipeline.load_games(self.con), self.con)
         self.assertEqual(S["endgames"], [])                                             # 가짜 게임은 2수짜리라 엔드게임이 없다
 
+    def test_brilliant(self):
+        import chess
+        P = pipeline
+        base = dict(cp_before=50, cp_after=60, loss=0, capture=1, piece=chess.BISHOP, mine=1, is_best=1)
+        greek = "r1bq1rk1/pppnbppp/4p3/3pP3/3P4/2NB1N2/PPP2PPP/R2QK2R w KQ - 0 1"
+        b = chess.Board(greek)
+        sac = P.sacrifice(b, b.parse_san("Bxh7+"))
+        self.assertEqual((sac[0], b.copy().san(sac[1]) if False else sac[1].uci()), (2, "g8h7"))          # 비숍을 폰과 바꾸고 킹에게 잡힌다: 상대 이득 2
+        self.assertTrue(P.is_brilliant(dict(base, fen=greek, san="Bxh7+")))
+        self.assertEqual(P.classify(dict(base, fen=greek, san="Bxh7+", brill=1)), "brill")
+        self.assertFalse(P.is_brilliant(dict(base, fen=greek, san="Bxh7+", cp_before=600, cp_after=650)))   # 이미 압도적
+        self.assertFalse(P.is_brilliant(dict(base, fen=greek, san="Bxh7+", cp_before=-200, cp_after=-220, loss=20)))   # 둔 뒤에도 지는 자리
+        self.assertFalse(P.is_brilliant(dict(base, fen=greek, san="Bxh7+", cp_after=-30, loss=80)))        # 최선에서 멀다
+        self.assertFalse(P.is_brilliant(dict(base, fen=greek, san="Bd2", capture=0)))                      # 희생이 아니다
+        self.assertFalse(P.is_brilliant(dict(base, fen=greek, san="Nb5", capture=0, piece=chess.KNIGHT)))  # c7 폰이 잡지만 되잡는다 → 손해 아님
+        self.assertIsNone(P.sacrifice(chess.Board(greek), chess.Move.from_uci("d4d5")))                    # 폰은 세지 않는다
+        # 이미 잡힐 자리에 있던 기물을 다른 잡힐 칸으로 옮긴 것은 희생이 아니다
+        b = chess.Board("3k4/8/3p4/4N3/8/8/8/4K3 w - - 0 1")
+        self.assertIsNone(P.sacrifice(b, b.parse_san("Nd7")))
+        # 잡혀도 이길 기물이 없는 판으로 가는 수(마지막 폰을 잡음)는 희생이 아니다
+        b = chess.Board("8/8/6P1/7K/4bk2/8/8/8 b - - 0 52")
+        self.assertIsNone(P.sacrifice(b, b.parse_san("Bxg6+")))
+        # 기물 교환(잡은 값만큼 되잡힘)은 희생이 아니다
+        b = chess.Board("r1bqkbnr/pppp1ppp/2n5/4p3/3PP3/5N2/PPP2PPP/RNBQKB1R b KQkq - 0 3")
+        self.assertIsNone(P.sacrifice(b, b.parse_san("exd4")))
+        b = chess.Board("r1bqkb1r/pppp1ppp/2n2n2/4p3/3PP3/2N2N2/PPP2PPP/R1BQKB1R b KQkq - 0 4")
+        self.assertIsNone(P.sacrifice(b, b.parse_san("Nxd4")))                                             # 나이트로 폰을 잡고 나이트에 되잡힘: 이득 2
+        # 통계·요약: 가짜 게임(2수)에는 탁월한 수가 없고 구조만 있다
+        S = pipeline.compute_stats(pipeline.load_games(self.con), self.con)
+        self.assertEqual((S["brilliant"]["n"], S["brilliant"]["opp"], S["brilliant"]["list"]), (0, 0, []))
+        self.assertIn("brill", [r[1] for r in self.con.execute("PRAGMA table_info(plies)")])
+
     def test_finish(self):
         f = pipeline.compute_stats(pipeline.load_games(self.con), self.con)["finish"]
         self.assertEqual(set(f), {"W", "L", "D"})

@@ -237,6 +237,27 @@ document.addEventListener('click',(e)=>{
 function drawAll(root){ (root||document).querySelectorAll('.viewer').forEach(el=>{ if(!el.innerHTML) drawViewer(el.id); }); }
 
 /* 실수 국면 뷰어: 정답 수순 / 내 수와 반격 */
+/* 탁월한 수 설명 (게임 페이지·대시보드 공용) */
+const BRILL_D='기물을 내주는데도 엔진 평가가 유지되는 수 (체스닷컴의 !!). 두기 전 이미 압도적이지 않았고, 둔 뒤에도 지는 자리가 아닌 희생만 셉니다.';
+/* 탁월한 수 장면: 둔 수 → 그 뒤 최선 수순, 상대가 희생 기물을 잡았을 때의 수순 */
+function brilliantViewer(w){
+  const flip=w.color==='b'||w.mover==='b';
+  const toW=(cp)=>cp==null?null:(w.mover==='w'?cp:-cp);
+  const start={fen:w.fen,cp:toW(w.cp_before),arrows:[[w.uci,BLUE]],caption:`<span style="color:${BLUE}">■</span> 탁월한 수 ${esc(w.san)} &nbsp;·&nbsp; 승률 ${wpTxt(w.cp_before)}`};
+  const played={fen:w.after_fen||w.fen,san:w.san,cp:toW(w.cp_after),num:w.mover==='w'?`${w.move}.`:`${w.move}...`,last:[w.uci.slice(0,2),w.uci.slice(2,4)],
+    caption:`${esc(w.san)} 을 두면 ${w.take?`${esc(w.take)} 로 잡힐 수 있지만 `:''}평가 ${ev(w.cp_before)} → ${ev(w.cp_after)} · ${wpChange(w.cp_before,w.cp_after)}`};
+  const lines=[];
+  const walk=(steps,cpEnd,label,first,more)=>{ const states=[start,played]; let mover=w.mover==='w'?'b':'w', move=w.mover==='w'?w.move:w.move+1;
+    steps.forEach((s,i)=>{ states.push({fen:s.fen,san:s.san,cp:toW(cpEnd!=null?cpEnd:w.cp_after),num:mover==='w'?`${move}.`:(i===0?`${move}...`:''),last:[s.uci.slice(0,2),s.uci.slice(2,4)],caption:i===0?first(s):more});
+      if(mover==='b') move++; mover=mover==='w'?'b':'w'; });
+    return states; };
+  const take=(w.refutation||[]);
+  if(take.length) lines.push({label:'기물을 잡으면',cls:'red',states:walk(take,w.take_cp,'',s=>`상대가 ${esc(s.san)} 로 잡으면 → 평가 ${ev(w.take_cp!=null?w.take_cp:w.cp_after)} (승률 ${wpTxt(w.take_cp!=null?w.take_cp:w.cp_after)})`,'잡은 뒤 수순 계속')});
+  const cont=(w.best_line||[]);
+  if(cont.length) lines.push({label:'최선 응수',cls:'green',states:walk(cont,w.cont_cp,'',s=>`상대의 최선 응수 ${esc(s.san)} → 평가 ${ev(w.cont_cp!=null?w.cont_cp:w.cp_after)}`,'최선 수순 계속')});
+  if(!lines.length) lines.push({label:'탁월한 수',states:[start,played]});
+  return viewer({flip,lines});
+}
 function blunderViewer(w){
   const flip=w.color==='b'||w.mover==='b';
   const toW=(cp)=>cp==null?null:(w.mover==='w'?cp:-cp);   // 저장된 cp 는 둔 쪽 기준 → 막대는 백 기준

@@ -165,6 +165,10 @@ class CDP:
         return out
 
 
+def gameid(url):
+    return url.rstrip('/').rsplit('/', 1)[-1]
+
+
 def winpct(cp):
     """파이프라인·shared.js 와 같은 승률 식"""
     import math
@@ -262,6 +266,20 @@ def run(c, base, server, shots):
         c.go(base + "index.html" + q() + "#stats", READY); c.pump(0.4); c.tap("[data-for='stats'] [data-sub='phase']"); c.pump(0.3)
         if S.get("endgames"):
             check("엔드게임 종류별 표", c.ev("document.querySelectorAll('.endgames tr').length") == len(S["endgames"]) + 1 and (S["endgames"][0]["label"] in c.ev("document.querySelector('.endgames').innerText")), len(S["endgames"]))
+        br = S.get("brilliant") or {}
+        tile = c.ev("[...document.querySelectorAll('.tile')].find(t=>t.textContent.includes('탁월한 수'))?.textContent") or ""
+        check("탁월한 수 타일", str(br.get("n", 0)) in tile and ("판에 하나꼴" in tile or "아직 없음" in tile), tile[:60])
+        rows = c.ev("document.querySelectorAll('.card.brill .game').length")
+        check("탁월한 수 목록", rows == len(br.get("list", [])) and ("아직 탁월한 수" in c.ev("document.querySelector('.card.brill').textContent") or rows > 0), rows)
+        w = next((w for w in br.get("list", []) if w.get("refutation")), None)
+        if w:
+            i = br["list"].index(w)
+            c.ev(f"document.querySelector('[data-expand=\"br{i}\"]').scrollIntoView({{block:'center'}})"); c.tap(f"[data-expand='br{i}']"); c.pump(0.4)
+            vid = c.ev(f"document.querySelector('#br{i} .viewer')?.id")
+            tabs = c.ev(f"[...document.querySelectorAll('#br{i} .vtabs .btn')].map(b=>b.textContent)") or []
+            check("탁월한 수 장면: '기물을 잡으면' 수순과 평가 막대", vid and "기물을 잡으면" in tabs and c.ev(f"!!document.querySelector('#{vid}-ev')"), tabs)
+            c.tap(f"#{vid} [data-go='1']"); c.pump(0.2)
+            snap("brilliant")
         n = c.ev("document.querySelectorAll('.finish .fin').length"); tot = sum(x["n"] for k in S["finish"] for x in S["finish"][k])
         check("승부가 끝난 방식 카드", n == sum(1 for k in "WLD" if S["finish"].get(k)) and tot == S["overview"]["games"] and c.ev("document.querySelectorAll('.finish .fbar i').length") == sum(len(S["finish"][k]) for k in S["finish"]), (n, tot))
         snap("finish")
@@ -485,6 +503,14 @@ def run(c, base, server, shots):
     c.call("Input.dispatchTouchEvent", type="touchEnd", touchPoints=[]); c.pump(0.4)
     check("보드를 왼쪽으로 밀면 다음 수", c.ev(CUR) == min(n, cur0 + 1), f"{cur0} → {c.ev(CUR)}")
     errs = c.errors(); check("게임 페이지에서 오류 없음", not errs, errs[:4])
+    bw = next(iter((S.get("brilliant") or {}).get("list", [])), None)
+    if bw:
+        bply = (bw["move"] - 1) * 2 + (1 if bw["mover"] == "w" else 2)
+        c.go(base + f"game.html?id={gameid(bw['url'])}&ply={bply}" + q("?"), "!!document.querySelector('#board svg.board')"); c.pump(0.3)
+        info = c.ev("document.querySelector('#info')?.textContent") or ""
+        check("게임 페이지: 탁월한 수 배지와 설명", c.ev("document.querySelector('#info .cls.brill')?.textContent") == "탁월" and "기물을 내주는데도" in info and bw["san"] in info, info[:80])
+        check("게임 페이지: 탁월한 수 카드와 범례", c.ev("!!document.querySelector('#main .key .cls.brill') && [...document.querySelectorAll('.legend')].some(l=>l.textContent.includes('탁월'))"))
+        snap("game_brilliant")
     c.go(base + "game.html?id=999" + q("?"), "!!document.querySelector('#main .empty')"); check("없는 게임은 안내문", "찾을 수 없습니다" in (c.ev("document.querySelector('#main').textContent") or "")); c.errors()
 
     # ------------------------------------------------------------ 퍼즐

@@ -36,6 +36,10 @@ MOVES_TIME = 3.0       # 국면 하나의 모든 수 평가에 쓰는 최대 초
 BOOK_LINES = 4         # 오프닝 하나에 만드는 라인 수 (메인라인 + 상대가 자주 두는 갈래)
 BOOK_MIN_N = 8         # 이 판 수 이상이거나 취약한 오프닝에 연습 라인을 만든다
 ALT_WP = 5.0           # 최선 수와 승률 차이가 이 안(%p)이면 같이 좋은 수로 인정
+BRILL_SAC = 2          # 탁월한 수: 정적 교환으로 상대가 이만큼(폰 단위) 이상 공짜로 얻을 수 있는 기물(폰 제외)을 내주는 수
+BRILL_WIN_BEFORE = 500 # 탁월한 수: 두기 전 평가가 이보다 높으면(이미 압도적) 치지 않는다
+BRILL_LOSE_AFTER = -100  # 탁월한 수: 둔 뒤 평가가 이보다 낮으면(지는 자리) 치지 않는다
+BRILL_V = "2"          # 탁월한 수 판정 규칙 버전. 바꾸면 다음 실행에서 모든 판을 다시 판정한다
 WORKERS = 3
 UA = "chess-dashboard/1.0 (personal analysis; github.com/{owner}/{repo})"
 KST = timezone(timedelta(hours=9))
@@ -93,6 +97,10 @@ def db():
     CREATE TABLE IF NOT EXISTS book(fen TEXT PRIMARY KEY, depth INTEGER, data TEXT);
     CREATE TABLE IF NOT EXISTS moves(fen TEXT PRIMARY KEY, depth INTEGER, data TEXT);
     """)
+    pcols = {r[1] for r in con.execute("PRAGMA table_info(plies)")}
+    if "brill" not in pcols:   # 1 = 탁월한 수 (기물을 내주고도 평가가 유지되는 수). tag_brilliant 가 채운다
+        con.execute("ALTER TABLE plies ADD COLUMN brill INTEGER DEFAULT 0")
+        con.commit()
     cols = {r[1] for r in con.execute("PRAGMA table_info(games)")}
     if "pushed" not in cols:
         con.execute("ALTER TABLE games ADD COLUMN pushed INTEGER DEFAULT 0")
@@ -316,7 +324,7 @@ def analyze_game(args):
                        wp_loss=round(max(0, winpct(before) - winpct(after)), 1), clock=c, spent=spent)
             plies.append(rec)
             prev_cp_w, prev_best, node = cp_w, best_next, nxt
-        return url, plies
+        return url, tag_brilliant(plies)
     finally:
         eng.quit()
 
@@ -567,6 +575,93 @@ def tag_mistakes(plies):
     return plies
 
 
+# ---------------------------------------------------------------- 탁월한 수
+# 체스닷컴의 '탁월한 수(!!)'와 같은 뜻: 폰이 아닌 기물을 희생(정적으로는 공짜로 잡힘)하는데도 최선에 가깝고,
+# 두기 전에 이미 압도적이지 않았고, 둔 뒤에도 지는 자리가 아닌 수. 엔진 평가는 저장된 것을 쓰므로 추가 계산이 없다.
+def _hanging(board, color, min_gain=BRILL_SAC):
+    """board 에서 차례인 쪽이 color 의 기물(폰 제외)을 잡아 정적으로 min_gain 이상 얻는 칸 {칸: (이득, 잡는 수)}."""
+    out = {}
+    for m in board.legal_moves:
+        if not board.is_capture(m) or board.is_en_passant(m):
+            continue
+        v = board.piece_at(m.to_square)
+        if not v or v.color != color or v.piece_type == chess.PAWN:
+            continue
+        g = see(board, m)
+        if g >= min_gain and g > out.get(m.to_square, (0, None))[0]:
+            out[m.to_square] = (g, m)
+    return out
+
+
+def sacrifice(b, mv):
+    """mv 가 기물 희생이면 (상대가 얻는 값(폰 단위), 그 기물을 잡는 수), 아니면 None.
+    움직인 기물(폰·킹·승격 제외)을 둔 뒤 상대가 교환 끝에 BRILL_SAC 이상 이득을 보며 잡을 수 있어야 한다.
+    내가 이 수로 잡은 값은 뺀다 (기물을 서로 바꾸는 수는 희생이 아니다).
+    이미 잡힐 자리에 있던 기물을 다른 잡힐 칸으로 옮긴 것(어차피 잃을 기물)도 희생으로 치지 않는다."""
+    piece = b.piece_type_at(mv.from_square)
+    if piece in (chess.PAWN, chess.KING) or mv.promotion:
+        return None
+    me = b.turn
+    after = b.copy(stack=False)
+    after.push(mv)
+    if after.is_game_over():
+        return None
+    hit = _hanging(after, me).get(mv.to_square)
+    if not hit:
+        return None
+    victim = b.piece_type_at(mv.to_square)
+    got = PIECE_VAL[victim] if victim else 0
+    if hit[0] - got < BRILL_SAC:
+        return None
+    taken = after.copy(stack=False)
+    taken.push(hit[1])
+    if taken.is_insufficient_material():   # 잡혀도 이길 기물이 없는 판 (마지막 폰을 잡아 무승부로 가는 수 등)은 희생이 아니다
+        return None
+    if not b.is_check():
+        nb = b.copy(stack=False)
+        nb.turn = not me
+        nb.ep_square = None
+        if mv.from_square in _hanging(nb, me, 1):
+            return None
+    return (hit[0] - got, hit[1])
+
+
+def is_brilliant(p, b=None):
+    """저장된 평가(둔 쪽 기준)와 국면으로 탁월한 수인지 본다. b 는 p['fen'] 의 판 (없으면 만든다)."""
+    if p["cp_before"] >= BRILL_WIN_BEFORE or p["cp_after"] < BRILL_LOSE_AFTER or p["loss"] >= 50:
+        return False
+    b = b or chess.Board(p["fen"])
+    try:
+        mv = b.parse_san(p["san"])
+    except Exception:
+        return False
+    return sacrifice(b, mv) is not None
+
+
+def tag_brilliant(plies):
+    """게임 하나의 수 목록에 brill(0/1) 을 채운다 (제자리 수정). 분석 직후와 규칙 버전이 바뀐 뒤 다시 판정할 때 쓴다."""
+    for p in plies:
+        p["brill"] = int(is_brilliant(p))
+    return plies
+
+
+def retag_brilliant(con):
+    """규칙 버전이 바뀌었으면 모든 판의 탁월한 수를 다시 판정해 저장하고, 게임 상세 JSON 을 다시 내보내게 한다."""
+    if meta_get(con, "brill_v") == BRILL_V:
+        return 0
+    n = 0
+    for g in con.execute("SELECT url FROM games WHERE analyzed=1").fetchall():
+        plies = [dict(r) for r in con.execute("SELECT * FROM plies WHERE url=? ORDER BY ply", (g["url"],))]
+        tag_brilliant(plies)
+        con.executemany("UPDATE plies SET brill=? WHERE url=? AND ply=?", [(p["brill"], g["url"], p["ply"]) for p in plies])
+        n += sum(p["brill"] for p in plies)
+    meta_set(con, "brill_v", BRILL_V)
+    meta_set(con, "game_export_v", "")   # 수 분류가 바뀌므로 상세 JSON 전부 다시
+    con.commit()
+    log(f"탁월한 수 다시 판정 (규칙 v{BRILL_V}): {n}개")
+    return n
+
+
 def summarize(plies):
     """게임 하나의 요약 (DB summary 컬럼, 알림, 최근 게임 목록에 사용)."""
     mine = [p for p in plies if p["mine"]]
@@ -587,7 +682,7 @@ def summarize(plies):
                     cp_before=worst["cp_before"], cp_after=worst["cp_after"], wp_loss=worst["wp_loss"],
                     clock=worst["clock"], fen=worst["fen"], uci=uci_of(worst["fen"], worst["san"]),
                     best_uci=uci_of(worst["fen"], worst["best"]) if worst["best"] else None) if worst else None),
-        n_moves=len(mine), hung=hung, missed_mate=missed_mate,
+        n_moves=len(mine), hung=hung, missed_mate=missed_mate, brilliant=sum(1 for p in mine if p.get("brill")),
         my_clock_20=(my_clk[19] if len(my_clk) >= 20 else None), opp_clock_20=(op_clk[19] if len(op_clk) >= 20 else None),
         my_final_clock=(my_clk[-1] if my_clk else None), opp_final_clock=(op_clk[-1] if op_clk else None),
         max_eval=max((p["cp_after"] for p in mine), default=0), min_eval=min((p["cp_after"] for p in mine), default=0),
@@ -645,6 +740,29 @@ def engine_lines(eng, fen, played_san, best_san):
 
 
 
+BRILL_KEY = "!!"   # lines 테이블에서 탁월한 수의 수순을 구분하는 best 값
+
+
+def brilliant_lines(eng, fen, san):
+    """탁월한 수 하나: 그 수 뒤의 최선 수순(best_line, 상대 최선 응수부터)과 상대가 희생 기물을 잡았을 때의 수순(refutation).
+    take_cp / cont_cp 는 각 수순 끝의 평가 (둔 쪽 기준, 잡는 수 또는 응수 직후 국면의 값)."""
+    b = chess.Board(fen)
+    mv = b.parse_san(san)
+    sac = sacrifice(b, mv)
+    after = b.copy()
+    after.push(mv)
+    me = b.turn
+    out = dict(best_line=[], refutation=[], alts=[], take=None, take_cp=None, cont_cp=None)
+    if after.is_game_over():
+        return out
+    info = eng.analyse(after, chess.engine.Limit(depth=LINE_DEPTH))
+    out["best_line"], out["cont_cp"] = pv_steps(after, info.get("pv", []), 5), cp_of(info["score"], me)
+    if sac:
+        info2 = eng.analyse(after, chess.engine.Limit(depth=LINE_DEPTH), root_moves=[sac[1]])
+        out["refutation"], out["take_cp"], out["take"] = pv_steps(after, info2.get("pv", []), 6), cp_of(info2["score"], me), after.san(sac[1])
+    return out
+
+
 def lines_todo(con):
     """수순이 필요한데 아직 계산되지 않은 (fen, 둔 수, 최선 수) 목록. 최근 게임 순."""
     todo, seen = [], set()
@@ -671,6 +789,10 @@ def lines_todo(con):
     for r in con.execute("""SELECT fen, san FROM plies WHERE mine=1 AND move<=15 AND best IS NOT NULL AND best!=san
                             GROUP BY fen, san HAVING count(*)>=2 AND avg(loss)>=60""").fetchall():
         add(r[0], r[1], common_best(con, r[0], r[1]))
+    # 4) 내 탁월한 수: 그 뒤 수순과 '기물을 잡으면' 수순 (best 자리에 BRILL_KEY)
+    for r in con.execute("""SELECT p.fen, p.san FROM plies p JOIN games g ON g.url=p.url
+                            WHERE p.mine=1 AND p.brill=1 ORDER BY g.end_time DESC, p.ply""").fetchall():
+        add(r[0], r[1], BRILL_KEY)
     return todo
 
 
@@ -699,7 +821,7 @@ def enrich_lines(con, cfg, limit=LINES_BATCH):
     try:
         for fen, san, best in batch:
             try:
-                data = engine_lines(eng, fen, san, best)
+                data = brilliant_lines(eng, fen, san) if best == BRILL_KEY else engine_lines(eng, fen, san, best)
             except Exception as e:   # 한 국면이 실패해도 계속. 빈 결과를 저장해 매번 다시 시도하지 않는다
                 log(f"  수순 계산 실패 {san}: {e}")
                 data = dict(best_line=[], refutation=[], alts=[], puzzle_ok=False)
@@ -721,7 +843,7 @@ def cached_lines(con, fen, san, best=None):
     r = con.execute("SELECT data FROM lines WHERE fen=? AND played=? AND best=?", (fen, san, best or "")).fetchone()
     if r:
         d = json.loads(r[0])
-        return dict(best_line=d.get("best_line", []), refutation=d.get("refutation", []), alts=d.get("alts", []))
+        return dict(d, best_line=d.get("best_line", []), refutation=d.get("refutation", []), alts=d.get("alts", []))
     if has_table(con, "pv_cache"):
         r = con.execute("SELECT data FROM pv_cache WHERE fen=? AND played=?", (fen, san)).fetchone()
         if r:
@@ -809,7 +931,7 @@ def enrich_moves(con, cfg, limit=MOVES_BATCH, eng=None):
 
 
 PLY_COLS = ("ply", "move", "mover", "mine", "san", "best", "is_best", "cp_before", "cp_after", "loss", "wp_loss",
-            "clock", "spent", "capture", "chk", "piece", "phase", "fen")
+            "clock", "spent", "capture", "chk", "piece", "phase", "fen", "brill")
 
 
 def store_analysis(con, url, plies):
@@ -879,7 +1001,7 @@ def with_lines(con, w):
     if not w.get("uci"):
         w["uci"] = uci_of(w["fen"], w["san"])
         w["best_uci"] = uci_of(w["fen"], w["best"]) if w.get("best") else None
-    w.update(cached_lines(con, w["fen"], w["san"], w.get("best")) if con else dict(best_line=[], refutation=[], alts=[]))
+    w.update(cached_lines(con, w["fen"], w["san"], w.get("lines_key") or w.get("best")) if con else dict(best_line=[], refutation=[], alts=[]))
     try:
         b = chess.Board(w["fen"]); b.push_san(w["san"]); w["after_fen"] = b.fen()
     except Exception:
@@ -1117,7 +1239,7 @@ def compute_stats(games, con=None):
         S["recent"].append(dict(url=g["url"], date=g["date"], color=g["my_color"], opp=g["opp"], opp_elo=g["opp_elo"],
                                 my_elo=g["my_elo"], outcome=g["outcome"], my_result=g["my_result"], opp_result=g["opp_result"],
                                 eco_name=g["eco_name"][:35], evals=evals,
-                                **{k: g["summary"].get(k) for k in ("accuracy", "blunders", "mistakes", "hung", "missed_mate",
+                                **{k: g["summary"].get(k) for k in ("accuracy", "blunders", "mistakes", "hung", "missed_mate", "brilliant",
                                                                     "my_final_clock", "opp_final_clock", "n_moves")},
                                 cats=Counter(p["cat"] for p in g["plies"] if p.get("cat")).most_common(),
                                 worst=with_lines(con, worst_with_cat(g))))
@@ -1145,6 +1267,11 @@ def compute_stats(games, con=None):
                 S["examples"]["collapse"].append(base)
     for k in S["examples"]:
         S["examples"][k] = [with_lines(con, w) for w in S["examples"][k]]
+    # 탁월한 수: 기물을 내주고도 평가가 유지된 수 (체스닷컴의 !!). 최근 것부터 12개는 장면과 수순을 붙인다
+    bm = [(g, p) for g in games[::-1] for p in g["plies"] if p["mine"] and p.get("brill")]
+    S["brilliant"] = dict(n=len(bm), opp=sum(1 for g in games for p in g["plies"] if not p["mine"] and p.get("brill")),
+                          games=len({g["url"] for g, _ in bm}), pg=round(len(bm) / n, 2),
+                          list=[with_lines(con, brill_rec(g, p)) for g, p in bm[:12]])
     S["coach"] = coach_stats(games, con)
     S["repertoire"] = repertoire_stats(games, con)
     S["weaknesses"] = weaknesses(S, games)
@@ -1156,6 +1283,15 @@ def mistake_rec(g, p):
     return dict(url=g["url"], date=g["date"], opp=g["opp"], color=g["my_color"], move=p["move"], mover=p["mover"], ply=p["ply"],
                 san=p["san"], best=p["best"], cp_before=p["cp_before"], cp_after=p["cp_after"], wp_loss=p["wp_loss"],
                 clock=p["clock"], spent=p["spent"], phase=p["phase"], fen=p["fen"], cat=p.get("cat"))
+
+
+def brill_rec(g, p):
+    """탁월한 수 한 개의 표시용 레코드. with_lines 가 그 뒤 수순과 '잡으면' 수순을 붙인다 (lines 키 BRILL_KEY)."""
+    b = chess.Board(p["fen"])
+    sac = sacrifice(b, b.parse_san(p["san"]))
+    b.push_san(p["san"])
+    return dict(mistake_rec(g, p), brill=1, lines_key=BRILL_KEY, sac=sac[0] if sac else None, take=b.san(sac[1]) if sac else None,
+                piece=p.get("piece"))
 
 
 def worst_with_cat(g):
@@ -1901,6 +2037,8 @@ def weaknesses(S, games=None):
 def classify(p):
     if p["cp_before"] >= 9000 and p["cp_after"] < 9000:
         return "miss"
+    if p.get("brill"):
+        return "brill"
     if p["is_best"] or p["loss"] == 0:
         return "best"
     l = p["loss"]
@@ -1938,6 +2076,10 @@ def export_game(con, g):
             L = cached_lines(con, p["fen"], p["san"], p["best"])
             if L["best_line"] or L["refutation"]:
                 lines[str(p["ply"])] = dict(best_line=L["best_line"], refutation=L["refutation"])
+        elif p["mine"] and cls == "brill":
+            L = cached_lines(con, p["fen"], p["san"], BRILL_KEY)
+            if L["best_line"] or L["refutation"]:
+                lines[str(p["ply"])] = dict(best_line=L["best_line"], refutation=L["refutation"], take=L.get("take"), take_cp=L.get("take_cp"), cont_cp=L.get("cont_cp"))
         board.push(mv)
         fens.append(board.fen())
     summary = json.loads(g["summary"]) if isinstance(g.get("summary"), str) else (g.get("summary") or {})
@@ -1951,7 +2093,7 @@ def export_game(con, g):
     return path
 
 
-GAME_EXPORT_V = "4"    # 게임 상세 JSON 의 형식 버전. 올리면 다음 실행에서 모든 게임을 다시 내보낸다 (2: 실수 유형 cat, 3: 교환 평가로 다시 분류, 4: 상대 수법을 여섯 유형으로)
+GAME_EXPORT_V = "5"    # 게임 상세 JSON 의 형식 버전. 올리면 다음 실행에서 모든 게임을 다시 내보낸다 (2: 실수 유형 cat, 3: 교환 평가로 다시 분류, 4: 상대 수법을 여섯 유형으로, 5: 탁월한 수)
 
 
 def export_missing_games(con):
@@ -2016,6 +2158,8 @@ def notify(cfg, game, summary, dashboard_url):
         lines.append(f"기물 방치 {summary['hung']}회")
     if summary.get("missed_mate"):
         lines.append(f"외통 놓침 {summary['missed_mate']}회")
+    if summary.get("brilliant"):
+        lines.append(f"탁월한 수 {summary['brilliant']}개 (기물을 내주고도 평가가 유지된 수)")
     title = f"래피드 {res}{'(' + detail + ')' if detail else ''} · 레이팅 {game['my_elo']}"
     click = f"{dashboard_url.rstrip('/')}/game.html?id={game_id(game['url'])}{'&ply=' + str((w['move'] - 1) * 2 + (1 if w['mover'] == 'w' else 2)) if w else ''}"
     actions = [{"label": "대시보드", "url": dashboard_url}, {"label": "체스닷컴", "url": game["url"]}]
@@ -2314,6 +2458,7 @@ def main():
         except Exception as e:
             log(f"친선 대국 정리 실패: {e}")
         new_done = analyze_pending(con, cfg)
+    brill_n = retag_brilliant(con)   # 판정 규칙이 바뀌었을 때만 전체 다시 판정 (엔진 없이 몇 초)
     # 실수 국면의 수순·복수 정답. 밀린 것이 있으면 한 번에 LINES_BATCH 개씩, 최근 게임부터.
     lines_n, lines_urls = 0, set()
     try:
@@ -2344,7 +2489,7 @@ def main():
     pending_notify = [dict(r) for r in con.execute("SELECT * FROM games WHERE analyzed=1 AND notified=0")]
     if code_changed:
         log("코드가 바뀌어 통계를 다시 만듭니다")
-    rendered = bool(new_done or lines_n or book_n or moves_n or purged or a.render_only or code_changed or not os.path.exists(index))
+    rendered = bool(new_done or lines_n or book_n or moves_n or purged or brill_n or a.render_only or code_changed or not os.path.exists(index))
     if rendered:
         # 수순이 새로 계산된 게임의 상세 JSON 은 다시 내보낸다
         for url in set(new_done) | lines_urls:

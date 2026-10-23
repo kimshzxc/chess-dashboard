@@ -38,7 +38,7 @@ const catBars=(cats,n)=>{ const top=cats.slice(0,n); return bars(top.map(c=>({la
 document.addEventListener('click',(e)=>{
   const t=e.target.closest('[data-expand]'); if(!t) return;
   const box=document.getElementById(t.dataset.expand); const w=JSON.parse(box.dataset.w||'null');
-  if(!box.innerHTML && w){ box.innerHTML=blunderViewer(w); drawAll(box); applyTheme(); }
+  if(!box.innerHTML && w){ box.innerHTML=w.brill?brilliantViewer(w):blunderViewer(w); drawAll(box); applyTheme(); }
   box.hidden=!box.hidden; (t.querySelector('.tg')||t).textContent=box.hidden?'장면 보기':'접기';
 });
 
@@ -405,6 +405,19 @@ function endgameCard(eg){
 }
 /* 승부가 끝난 방식: 승리·패배·무승부마다 메이트/기권/시간… 비율 막대 */
 const HOW={checkmated:'메이트',resigned:'기권',timeout:'시간',abandoned:'포기',agreed:'합의',repetition:'반복',stalemate:'스테일메이트',insufficient:'기물 부족',timevsinsufficient:'시간 대 기물 부족','50move':'50수 규칙',win:'승'};
+/* 탁월한 수 목록: 최근 것부터, 장면 보기로 '잡으면' 수순과 최선 응수를 본다 */
+function brillRow(w,wid){
+  return `<div class="game"><div class="m"><div class="h"><b><span class="cls brill">탁월</span> <span class="mono">${mv(w)}</span></b><span class="s">${w.date}</span></div>
+      <div class="s">${w.take?`${esc(w.take)} 로 잡힐 수 있는데도 `:''}${ev(w.cp_before)} → ${ev(w.cp_after)} · ${w.color==='w'?'백':'흑'} vs ${esc(w.opp)} · ${PH[w.phase]||''}${w.take_cp!=null?` · 잡으면 ${ev(w.take_cp)}`:''}</div>
+      <div class="links"><span class="btn" data-expand="${wid}">장면 보기</span><a href="${gameLink(w.url,plyOf(w))}">이 판에서 보기 ›</a></div>
+      <div id="${wid}" hidden data-w='${esc(JSON.stringify(w))}'></div></div></div>`;
+}
+function brillCard(br){
+  let h=`<div class="card brill"><h3 style="margin-top:0">탁월한 수 <span class="sub">${esc(BRILL_D)}</span></h3>`;
+  if(!br.list||!br.list.length) h+=`<div class="sub">아직 탁월한 수로 분류된 수가 없습니다. 기물을 희생하는 전술이 맞아떨어지면 여기에 쌓입니다.</div>`;
+  else br.list.forEach((w,i)=>{ h+=brillRow(w,`br${i}`); });
+  return h+'</div>';
+}
 function finishCard(f){
   if(!f) return '';
   const row=(k,name,color)=>{ const xs=f[k]||[], n=xs.reduce((a,x)=>a+x.n,0); if(!n) return '';
@@ -544,11 +557,13 @@ function render(){
     <div class="tile"><div class="k">-3 이하 불리했던 판</div><div class="v">${cl.n?Math.round(cl.won/cl.n*100):0}% 역전</div><div class="d">${cl.n}판 중 ${cl.won}승 ${cl.draw}무 ${cl.lost}패</div></div>
   </div>${finishCard(S.finish)}</section>`;
   const hungRows=Object.entries(tc.hung).sort((a,b)=>b[1]-a[1]);
+  const br=S.brilliant||{n:0,opp:0,games:0,pg:0,list:[]};
   h+=`<section data-view="stats" data-sub="phase"><h2>전술</h2><div class="tiles">
     <div class="tile"><div class="k">기물 방치 (한 수에 잡히는 기물)</div><div class="v">${tc.hung_total}</div><div class="d">판당 ${tc.hung_pg} · ${hungRows.map(([k,v])=>`${k} ${v}`).join(' · ')||'-'}<br>시간 1분 이상 남았을 때 ${tc.hung_with_time}회</div></div>
     <div class="tile"><div class="k">공짜 기물 안 잡음</div><div class="v">${tc.missed_free}</div><div class="d">잡는 수가 최선(+2 이상)인데 다른 수</div></div>
     <div class="tile"><div class="k">외통 놓침</div><div class="v">${tc.missed_mate_total}</div><div class="d">${Object.entries(tc.missed_mate).map(([k,v])=>`${k}${k==='5'?'+':''}수 외통 ${v}`).join(' · ')||'-'}</div></div>
-  </div></section>`;
+    <div class="tile"><div class="k">탁월한 수 <span class="cls brill" style="font-size:10px;padding:1px 6px">!!</span></div><div class="v" style="color:var(--c-brill)">${br.n}</div><div class="d">${br.games}판에서 · 상대 ${br.opp}개<br>${br.n?`${Math.round(1/br.pg)}판에 하나꼴`:'아직 없음'}</div></div>
+  </div>${brillCard(br)}</section>`;
   if(S.monthly.length>1){
     h+=`<section data-view="stats" data-sub="session"><h2>월별 추이</h2><div class="card"><table><tr><th>월</th><th class="n">판</th><th class="n">승률</th><th class="n">정확도</th><th class="n">대실수/판</th><th class="n">레이팅</th></tr>`;
     for(const m of S.monthly) h+=`<tr><td>${m.month}</td><td class="n">${m.games}</td><td class="n">${m.score}%</td><td class="n">${m.accuracy}%</td><td class="n">${m.blunders_pg}</td><td class="n">${m.rating}</td></tr>`;
