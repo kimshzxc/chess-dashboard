@@ -73,6 +73,7 @@ function trendChart(t){
   CHARTS[id]={N,L,pw,W,x,ys:i=>y(roll[i]),tip:i=>`${t.series[i][0]} · 이 판 ${fmtV(t,vals[i]/sc)} · 최근 ${win}판 평균 ${fmtV(t,roll[i]/sc)}`};
   return h;
 }
+const RDOTS=150;   // 이 판 수까지만 레이팅 그래프에 승·패 점을 찍는다
 function ratingChart(series){
   const N=series.length; if(N<2) return '';
   const W=360,H=170,L=40,R=12,T=14,B=30,pw=W-L-R,ph=H-T-B;
@@ -87,8 +88,8 @@ function ratingChart(series){
   h+=`<defs><linearGradient id="rgrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="var(--s1)" stop-opacity=".32"/><stop offset="1" stop-color="var(--s1)" stop-opacity="0"/></linearGradient></defs>`;
   h+=`<path d="${line} L${x(N-1).toFixed(1)} ${T+ph} L${L} ${T+ph} Z" fill="url(#rgrad)"/>`;
   h+=`<path d="${line}" fill="none" stroke="var(--s1)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
-  const rr=N>120?1.9:N>60?2.6:3.6;
-  h+=series.map((s,i)=>`<circle cx="${x(i).toFixed(1)}" cy="${y(s[1]).toFixed(1)}" r="${rr}" fill="${col[s[2]]||col.D}"/>`).join('');
+  // 판이 많으면 점이 서로 겹쳐 색을 읽을 수 없으니 선만 그리고, 누른 자리의 결과는 설명 상자에 쓴다
+  if(N<=RDOTS){ const rr=N>120?1.9:N>60?2.6:3.6; h+=series.map((s,i)=>`<circle cx="${x(i).toFixed(1)}" cy="${y(s[1]).toFixed(1)}" r="${rr}" fill="${col[s[2]]||col.D}"/>`).join(''); }
   h+=`<text x="${L}" y="${H-6}" font-size="11" fill="var(--muted)">${series[0][0]}</text><text x="${W-R}" y="${H-6}" font-size="11" text-anchor="end" fill="var(--muted)">${series[N-1][0]}</text>`;
   h+=`<g class="xc" style="display:none"><line class="xc-l" y1="${T}" y2="${T+ph}" stroke="var(--text2)" stroke-width="1"/><circle class="xc-d" r="5" fill="var(--s1)" stroke="var(--surface)" stroke-width="2"/></g>`;
   h+=`</svg><div class="tip"></div></div>`;
@@ -455,6 +456,7 @@ function applyView(){
 window.addEventListener('hashchange',()=>{ const v=location.hash.slice(1)||'home'; if(VIEWS.includes(v)&&v!==VIEW){ VIEW=v; applyView(); window.scrollTo(0,0); } });
 function render(){
   const S = DATA.windows[W];
+  document.body.dataset.w=W;
   document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.w===W));
   $('#title').textContent = `${DATA.username} · 래피드 분석`;
   $('#foot').innerHTML = `마지막 갱신 ${DATA.generated} (KST) · Stockfish 19 depth ${(DATA.meta||{}).depth||14}, 수순 depth ${(DATA.meta||{}).pv_depth||16} · 게임이 끝나면 1~2분 안에 자동 갱신<br>기물: maestro (sadsnake1, CC BY-NC-SA 4.0), cburnett (GPLv2+), merida (GPLv2+), alpha (Eric Bentzen), california (Jerry S., CC BY-NC-SA 4.0)`;
@@ -472,7 +474,7 @@ function render(){
     <div class="big">${o.rating}<span class="delta ${up?'up':dn?'down':''}">${up?'▲':dn?'▼':''} ${Math.abs(rd)}</span></div>
     <div class="meta">최고 ${o.rating_best} · ${o.rating_start}에서 시작 · ${o.first_date.slice(5)} ~ ${o.last_date.slice(5)}</div>
     ${S.rating_series&&S.rating_series.length>1?ratingChart(S.rating_series):''}
-    <div class="lg"><span><i class="dot" style="background:var(--win)"></i>승</span><span><i class="dot" style="background:var(--loss)"></i>패</span><span><i class="dot" style="background:var(--draw)"></i>무</span><span>그래프를 누르면 값 표시</span></div>
+    <div class="lg">${(S.rating_series||[]).length<=RDOTS?`<span><i class="dot" style="background:var(--win)"></i>승</span><span><i class="dot" style="background:var(--loss)"></i>패</span><span><i class="dot" style="background:var(--draw)"></i>무</span>`:`<span>판마다의 레이팅</span>`}<span>그래프를 누르면 값과 결과 표시</span></div>
   </div>
   <div class="mini3">
     <div class="tile"><div class="k">승률</div><div class="v">${o.score}%</div><div class="wdl"><i style="width:${o.win/tot*100}%;background:var(--win)"></i><i style="width:${o.draw/tot*100}%;background:var(--draw)"></i><i style="width:${o.loss/tot*100}%;background:var(--loss)"></i></div><div class="d">${o.win}승 ${o.draw}무 ${o.loss}패</div></div>
@@ -557,13 +559,23 @@ function render(){
     <div class="tile"><div class="k">-3 이하 불리했던 판</div><div class="v">${cl.n?Math.round(cl.won/cl.n*100):0}% 역전</div><div class="d">${cl.n}판 중 ${cl.won}승 ${cl.draw}무 ${cl.lost}패</div></div>
   </div>${finishCard(S.finish)}</section>`;
   const hungRows=Object.entries(tc.hung).sort((a,b)=>b[1]-a[1]);
-  const br=S.brilliant||{n:0,opp:0,games:0,pg:0,list:[]};
+  const br=S.brilliant||{n:0,opp:0,games:0,pg:0,list:[]}, gr=S.great||{n:0,opp:0,pg:0};
   h+=`<section data-view="stats" data-sub="phase"><h2>전술</h2><div class="tiles">
     <div class="tile"><div class="k">기물 방치 (한 수에 잡히는 기물)</div><div class="v">${tc.hung_total}</div><div class="d">판당 ${tc.hung_pg} · ${hungRows.map(([k,v])=>`${k} ${v}`).join(' · ')||'-'}<br>시간 1분 이상 남았을 때 ${tc.hung_with_time}회</div></div>
     <div class="tile"><div class="k">공짜 기물 안 잡음</div><div class="v">${tc.missed_free}</div><div class="d">잡는 수가 최선(+2 이상)인데 다른 수</div></div>
     <div class="tile"><div class="k">외통 놓침</div><div class="v">${tc.missed_mate_total}</div><div class="d">${Object.entries(tc.missed_mate).map(([k,v])=>`${k}${k==='5'?'+':''}수 외통 ${v}`).join(' · ')||'-'}</div></div>
     <div class="tile"><div class="k">탁월한 수 <span class="cls brill" style="font-size:10px;padding:1px 6px">!!</span></div><div class="v" style="color:var(--c-brill)">${br.n}</div><div class="d">${br.games}판에서 · 상대 ${br.opp}개<br>${br.n?`${Math.round(1/br.pg)}판에 하나꼴`:'아직 없음'}</div></div>
+    <div class="tile"><div class="k">대단한 수 <span class="cls great" style="font-size:10px;padding:1px 6px">!</span></div><div class="v" style="color:var(--c-great)">${gr.n}</div><div class="d">상대 실수를 바로 응징 · 판당 ${gr.pg} · 상대 ${gr.opp}개<br>장면은 게임 페이지에서</div></div>
   </div>${brillCard(br)}</section>`;
+  if(S.vs_rating){
+    const vr=S.vs_rating, by=Object.fromEntries(vr.map(r=>[r.key,r]));
+    const sbr=(rows)=>`<table><tr><th>상대</th><th class="n">판</th><th class="n">승률</th><th class="n">정확도</th><th class="n">대실수/판</th></tr>`+rows.filter(r=>r.n).map(r=>`<tr><td>${esc(r.label)}${r.gap!=null?`<div class="sub" style="font-size:12px">평균 ${r.gap>0?'+':''}${r.gap}</div>`:''}</td><td class="n">${r.n}</td><td class="n">${pct(r.score)}</td><td class="n">${r.accuracy!=null?r.accuracy+'%':'-'}</td><td class="n">${r.blunders_pg!=null?r.blunders_pg:'-'}</td></tr>`).join('')+`</table>`;
+    let note='';
+    if(by.up&&by.even&&by.up.n>=10&&by.even.n>=10&&by.up.score!=null&&by.up.score<by.even.score-10) note=`높은 상대에게 승률이 ${Math.round(by.even.score-by.up.score)}%p 낮습니다. 레이팅 차이를 생각하면 자연스러운 폭인지 정확도를 같이 보세요.`;
+    else if(by.down&&by.even&&by.down.n>=10&&by.even.n>=10&&by.down.score!=null&&by.down.score<by.even.score+5) note=`낮은 상대에게도 승률이 비슷한 상대와 거의 같습니다. 쉬운 판에서 방심하는지 대실수 수를 보세요.`;
+    else if(by.up&&by.up.n>=10&&by.up.score!=null&&by.up.score>=45) note=`높은 상대에게도 승률 ${pct(by.up.score)}로 잘 버팁니다.`;
+    h+=`<section class="vsr" data-view="stats" data-sub="session"><h2>상대 레이팅별<small>그 판의 내 레이팅과 50 이상 차이 나는 상대를 나눠 봄 · 평균은 상대와의 레이팅 차이</small></h2><div class="card">${sbr(vr)}${note?`<div class="sub" style="margin-top:8px">${note}</div>`:''}</div></section>`;
+  }
   if(S.monthly.length>1){
     h+=`<section data-view="stats" data-sub="session"><h2>월별 추이</h2><div class="card"><table><tr><th>월</th><th class="n">판</th><th class="n">승률</th><th class="n">정확도</th><th class="n">대실수/판</th><th class="n">레이팅</th></tr>`;
     for(const m of S.monthly) h+=`<tr><td>${m.month}</td><td class="n">${m.games}</td><td class="n">${m.score}%</td><td class="n">${m.accuracy}%</td><td class="n">${m.blunders_pg}</td><td class="n">${m.rating}</td></tr>`;
@@ -578,8 +590,16 @@ document.addEventListener('click',(e)=>{
   t.textContent=box.hidden?`나머지 ${box.children.length}${t.dataset.unit} 보기`:'접기';
   if(box.hidden) box.parentElement.scrollIntoView({block:'start'});
 });
-document.querySelectorAll('#tabs button').forEach(b=>b.addEventListener('click',()=>{closeSheet();W=b.dataset.w;try{localStorage.setItem('chess-window',W)}catch(e){};render();window.scrollTo(0,0)}));
-try{const s=localStorage.getItem('chess-window'); if(s&&DATA.windows[s]) W=s;}catch(e){}
-render();
-{ const q=new URLSearchParams(location.search); if(q.get('w')&&DATA.windows[q.get('w')]){ W=q.get('w'); render(); } if(q.get('weak')!=null) openSheet(+q.get('weak'));
-  if(q.get('cat')&&catData(DATA.windows[W],q.get('cat'))){ VIEW='mistakes'; setSub('mistakes','cats'); showCat(q.get('cat'),true); } }
+/* 최근 30일·7일 통계는 stats-30d.json / stats-7d.json 에 따로 있어 탭을 누를 때 받는다 (첫 화면은 전체 기간만) */
+async function loadWindow(w){
+  if(w in DATA.windows) return;
+  try{ const r=await fetch(`stats-${w}.json`,{cache:'no-cache'}); DATA.windows[w]=r.ok?(await r.json()).window:null; }
+  catch(e){ DATA.windows[w]=null; }
+}
+document.querySelectorAll('#tabs button').forEach(b=>b.addEventListener('click',async()=>{closeSheet();W=b.dataset.w;try{localStorage.setItem('chess-window',W)}catch(e){}; b.classList.add('on'); await loadWindow(W); render();window.scrollTo(0,0)}));
+try{const s=localStorage.getItem('chess-window'); if(s&&WNAME[s]) W=s;}catch(e){}
+const Q=new URLSearchParams(location.search);
+if(Q.get('w')&&WNAME[Q.get('w')]) W=Q.get('w');
+await loadWindow(W); render();
+{ if(Q.get('weak')!=null) openSheet(+Q.get('weak'));
+  if(Q.get('cat')&&catData(DATA.windows[W],Q.get('cat'))){ VIEW='mistakes'; setSub('mistakes','cats'); showCat(Q.get('cat'),true); } }

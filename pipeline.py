@@ -40,6 +40,8 @@ BRILL_SAC = 2          # 탁월한 수: 정적 교환으로 상대가 이만큼(
 BRILL_WIN_BEFORE = 500 # 탁월한 수: 두기 전 평가가 이보다 높으면(이미 압도적) 치지 않는다
 BRILL_LOSE_AFTER = -100  # 탁월한 수: 둔 뒤 평가가 이보다 낮으면(지는 자리) 치지 않는다
 BRILL_V = "2"          # 탁월한 수 판정 규칙 버전. 바꾸면 다음 실행에서 모든 판을 다시 판정한다
+GREAT_GAIN = 100       # 대단한 수: 상대 실수 전보다 이만큼(cp) 이상 좋아진 것을 최선 수로 굳힌 수. 공짜 기물을 그냥 잡는 수는 뺀다
+RATING_GAP = 50        # 상대 레이팅별 성적: 내 레이팅과 이 이상 차이 나면 높은/낮은 상대
 WORKERS = 3
 UA = "chess-dashboard/1.0 (personal analysis; github.com/{owner}/{repo})"
 KST = timezone(timedelta(hours=9))
@@ -324,7 +326,7 @@ def analyze_game(args):
                        wp_loss=round(max(0, winpct(before) - winpct(after)), 1), clock=c, spent=spent)
             plies.append(rec)
             prev_cp_w, prev_best, node = cp_w, best_next, nxt
-        return url, tag_brilliant(plies)
+        return url, tag_mistakes(tag_brilliant(plies))
     finally:
         eng.quit()
 
@@ -568,10 +570,31 @@ def mistake_cat(p, nxt):
 
 
 def tag_mistakes(plies):
-    """게임 하나의 수 목록에서 내 실수에 cat 을 붙인다 (제자리 수정)."""
+    """게임 하나의 수 목록에서 내 실수에 cat 을, 상대 실수를 응징한 수에 great 를 붙인다 (제자리 수정)."""
     for i, p in enumerate(plies):
         if is_mistake(p):
             p["cat"] = mistake_cat(p, plies[i + 1] if i + 1 < len(plies) else None)
+    return tag_great(plies)
+
+
+def tag_great(plies):
+    """대단한 수(체스닷컴의 !)의 응징형: 상대가 실수(100cp 이상 손해)한 직후 최선 수로 그 이득을 굳힌 수.
+    둘째 수 평가가 없어 '유일한 좋은 수'는 보지 못한다. 공짜 기물을 그냥 잡는 수(정적 교환 2폰 이상 이득)와 탁월한 수는 뺀다.
+    둔 쪽 기준 평가가 상대 실수 전에 이미 BRILL_WIN_BEFORE 이상이었으면(이미 압도적) 치지 않는다."""
+    prev = None
+    for p in plies:
+        p["great"] = 0
+        if prev and (prev.get("loss") or 0) >= 100 and p.get("is_best") and not p.get("brill") and prev.get("cp_before") is not None:
+            before = -prev["cp_before"]                      # 상대가 실수하기 전, 이 수를 둔 쪽 기준 평가
+            if before < BRILL_WIN_BEFORE and (p.get("cp_after") or 0) - before >= GREAT_GAIN:
+                try:
+                    b = chess.Board(p["fen"])
+                    mv = b.parse_san(p["san"])
+                    obvious = b.is_capture(mv) and see(b, mv) >= BRILL_SAC
+                except Exception:
+                    obvious = False
+                p["great"] = int(not obvious)
+        prev = p
     return plies
 
 
@@ -683,6 +706,7 @@ def summarize(plies):
                     clock=worst["clock"], fen=worst["fen"], uci=uci_of(worst["fen"], worst["san"]),
                     best_uci=uci_of(worst["fen"], worst["best"]) if worst["best"] else None) if worst else None),
         n_moves=len(mine), hung=hung, missed_mate=missed_mate, brilliant=sum(1 for p in mine if p.get("brill")),
+        great=sum(1 for p in mine if p.get("great")),
         my_clock_20=(my_clk[19] if len(my_clk) >= 20 else None), opp_clock_20=(op_clk[19] if len(op_clk) >= 20 else None),
         my_final_clock=(my_clk[-1] if my_clk else None), opp_final_clock=(op_clk[-1] if op_clk else None),
         max_eval=max((p["cp_after"] for p in mine), default=0), min_eval=min((p["cp_after"] for p in mine), default=0),
@@ -1032,6 +1056,23 @@ def _score(outs):
     return round((c["W"] + 0.5 * c["D"]) / len(outs) * 100, 1) if outs else None
 
 
+def _bucket(gs, label):
+    """게임 묶음의 성적 한 줄: 판 수, 승률, 정확도, 판당 대실수."""
+    acc_v = acc([p["wp_loss"] for g in gs for p in g["plies"] if p["mine"]]) if gs else None
+    return dict(label=label, n=len(gs), score=_score([g["outcome"] for g in gs]), accuracy=acc_v,
+                blunders_pg=round(sum(g["summary"].get("blunders", 0) for g in gs) / len(gs), 2) if gs else None)
+
+
+def vs_rating_stats(games):
+    """상대 레이팅별 성적: 내 레이팅보다 RATING_GAP 이상 높은 상대 / 비슷한 상대 / RATING_GAP 이상 낮은 상대."""
+    b = defaultdict(list)
+    for g in games:
+        d = g["opp_elo"] - g["my_elo"]
+        b["up" if d >= RATING_GAP else "down" if d <= -RATING_GAP else "even"].append(g)
+    return [dict(_bucket(b[k], l), key=k, gap=round(sum(g["opp_elo"] - g["my_elo"] for g in b[k]) / len(b[k])) if b[k] else None)
+            for k, l in (("up", f"{RATING_GAP} 이상 높은 상대"), ("even", "비슷한 상대"), ("down", f"{RATING_GAP} 이상 낮은 상대"))]
+
+
 def tilt_stats(games):
     """틸트·세션: 직전 결과별 승률, 연패 후 승률, 세션 내 순서별 승률·정확도, 시간대별."""
     ctx = session_context(games)
@@ -1043,10 +1084,7 @@ def tilt_stats(games):
             streak[min(c["streak"], 3)].append(g)
         spos[1 if c["pos"] == 1 else 2 if c["pos"] == 2 else 3 if c["pos"] == 3 else 4 if c["pos"] <= 5 else 6].append(g)
         hours[c["hour"] // 6].append(g)
-    def pack(gs, label):
-        acc_v = acc([p["wp_loss"] for g in gs for p in g["plies"] if p["mine"]]) if gs else None
-        return dict(label=label, n=len(gs), score=_score([g["outcome"] for g in gs]), accuracy=acc_v,
-                    blunders_pg=round(sum(g["summary"].get("blunders", 0) for g in gs) / len(gs), 2) if gs else None)
+    pack = _bucket
     sess, cur = [], []
     for g in games:
         if cur and g["end_time"] - cur[-1]["end_time"] > SESSION_GAP:
@@ -1239,7 +1277,7 @@ def compute_stats(games, con=None):
         S["recent"].append(dict(url=g["url"], date=g["date"], color=g["my_color"], opp=g["opp"], opp_elo=g["opp_elo"],
                                 my_elo=g["my_elo"], outcome=g["outcome"], my_result=g["my_result"], opp_result=g["opp_result"],
                                 eco_name=g["eco_name"][:35], evals=evals,
-                                **{k: g["summary"].get(k) for k in ("accuracy", "blunders", "mistakes", "hung", "missed_mate", "brilliant",
+                                **{k: g["summary"].get(k) for k in ("accuracy", "blunders", "mistakes", "hung", "missed_mate", "brilliant", "great",
                                                                     "my_final_clock", "opp_final_clock", "n_moves")},
                                 cats=Counter(p["cat"] for p in g["plies"] if p.get("cat")).most_common(),
                                 worst=with_lines(con, worst_with_cat(g))))
@@ -1272,6 +1310,10 @@ def compute_stats(games, con=None):
     S["brilliant"] = dict(n=len(bm), opp=sum(1 for g in games for p in g["plies"] if not p["mine"] and p.get("brill")),
                           games=len({g["url"] for g, _ in bm}), pg=round(len(bm) / n, 2),
                           list=[with_lines(con, brill_rec(g, p)) for g, p in bm[:12]])
+    # 대단한 수(응징형): 개수만 센다. 장면은 게임 페이지에서 본다
+    gm = [p for g in games for p in g["plies"] if p["mine"] and p.get("great")]
+    S["great"] = dict(n=len(gm), opp=sum(1 for g in games for p in g["plies"] if not p["mine"] and p.get("great")), pg=round(len(gm) / n, 2))
+    S["vs_rating"] = vs_rating_stats(games)
     S["coach"] = coach_stats(games, con)
     S["repertoire"] = repertoire_stats(games, con)
     S["weaknesses"] = weaknesses(S, games)
@@ -2039,6 +2081,8 @@ def classify(p):
         return "miss"
     if p.get("brill"):
         return "brill"
+    if p.get("great"):
+        return "great"
     if p["is_best"] or p["loss"] == 0:
         return "best"
     l = p["loss"]
@@ -2093,7 +2137,7 @@ def export_game(con, g):
     return path
 
 
-GAME_EXPORT_V = "5"    # 게임 상세 JSON 의 형식 버전. 올리면 다음 실행에서 모든 게임을 다시 내보낸다 (2: 실수 유형 cat, 3: 교환 평가로 다시 분류, 4: 상대 수법을 여섯 유형으로, 5: 탁월한 수)
+GAME_EXPORT_V = "6"    # 게임 상세 JSON 의 형식 버전. 올리면 다음 실행에서 모든 게임을 다시 내보낸다 (2: 실수 유형 cat, 3: 교환 평가로 다시 분류, 4: 상대 수법을 여섯 유형으로, 5: 탁월한 수, 6: 대단한 수)
 
 
 def export_missing_games(con):
@@ -2160,6 +2204,8 @@ def notify(cfg, game, summary, dashboard_url):
         lines.append(f"외통 놓침 {summary['missed_mate']}회")
     if summary.get("brilliant"):
         lines.append(f"탁월한 수 {summary['brilliant']}개 (기물을 내주고도 평가가 유지된 수)")
+    if summary.get("great"):
+        lines.append(f"대단한 수 {summary['great']}개 (상대 실수를 바로 응징)")
     title = f"래피드 {res}{'(' + detail + ')' if detail else ''} · 레이팅 {game['my_elo']}"
     click = f"{dashboard_url.rstrip('/')}/game.html?id={game_id(game['url'])}{'&ply=' + str((w['move'] - 1) * 2 + (1 if w['mover'] == 'w' else 2)) if w else ''}"
     actions = [{"label": "대시보드", "url": dashboard_url}, {"label": "체스닷컴", "url": game["url"]}]
@@ -2390,7 +2436,10 @@ def render_all(con, cfg):
                 book[r["id"]]["trouble"] = (r.get("trouble") or [])[:3]
     json.dump(dict(generated=payload["generated"], depth=BOOK_DEPTH, moves=EARLY_MOVES, openings=book),
               open(os.path.join(DOCS, "book.json"), "w"), ensure_ascii=False, separators=(",", ":"))
-    json.dump(payload, open(os.path.join(DOCS, "stats.json"), "w"), ensure_ascii=False)
+    # 첫 화면이 빨리 뜨도록 stats.json 에는 전체 기간만 담고, 최근 30일·7일은 탭을 누를 때 받는 작은 파일로 나눈다
+    json.dump(dict(payload, windows=dict(all=windows["all"])), open(os.path.join(DOCS, "stats.json"), "w"), ensure_ascii=False)
+    for w in ("30d", "7d"):
+        json.dump(dict(generated=payload["generated"], window=windows[w]), open(os.path.join(DOCS, f"stats-{w}.json"), "w"), ensure_ascii=False)
     # 게임·퍼즐 페이지가 읽는 작은 요약: 전체 기간의 집중 과제와 유형별 최근 빈도
     co = (windows["all"] or {}).get("coach") or dict(cats=[], focus=[], games=0, k=0)
     json.dump(dict(generated=payload["generated"], games=co["games"], k=co["k"], focus=co["focus"],

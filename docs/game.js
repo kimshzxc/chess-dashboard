@@ -50,8 +50,8 @@ function tryInfo(){
   h+=`<div class="sub" style="margin-top:6px">브라우저용 스톡피시 19 라이트(1.7MB)로 계산합니다. 저장된 분석(depth ${G.depth||18})보다 얕고 수치가 조금 다를 수 있습니다.</div>`;
   return h;
 }
-const CLS={brill:['탁월','brill'],best:['최선','best'],good:['좋음','good'],inacc:['부정확','inacc'],mist:['실수','mist'],blun:['대실수','blun'],miss:['외통 놓침','blun']};
-const CLSCOLOR={brill:'var(--c-brill)',best:'var(--c-best)',good:'var(--c-good)',inacc:'var(--c-inacc)',mist:'var(--c-mist)',blun:'var(--c-blun)',miss:'var(--c-blun)'};
+const CLS={great:['대단','great'],brill:['탁월','brill'],best:['최선','best'],good:['좋음','good'],inacc:['부정확','inacc'],mist:['실수','mist'],blun:['대실수','blun'],miss:['외통 놓침','blun']};
+const CLSCOLOR={great:'var(--c-great)',brill:'var(--c-brill)',best:'var(--c-best)',good:'var(--c-good)',inacc:'var(--c-inacc)',mist:'var(--c-mist)',blun:'var(--c-blun)',miss:'var(--c-blun)'};
 
 async function load(){
   const coach=fetch('coach.json',{cache:'no-cache'}).then(r=>r.ok?r.json():null).catch(()=>null);
@@ -93,18 +93,27 @@ function renderMain(){
   h+=`<div class="card"><div class="sub">평가 그래프 (누르면 이동 · 점: 실수/대실수)</div>${graphSVG()}</div>`;
   const cs=clockSVG();
   if(cs) h+=`<div class="card"><div class="sub">남은 시간 (누르면 그 수로 이동)</div>${cs}<div class="legend"><span><i class="lk" style="background:var(--s1)"></i>나</span><span><i class="lk" style="background:var(--s2)"></i>상대</span><span><i class="dotk"></i>내가 45초 이상 쓴 수</span></div></div>`;
-  const cnt=(who)=>{ const c={brill:0,best:0,good:0,inacc:0,mist:0,blun:0}; G.plies.forEach(p=>{ if(p.mine===who){ const k=p.cls==='miss'?'blun':p.cls; c[k]=(c[k]||0)+1; } }); return c; };
+  const cnt=(who)=>{ const c={great:0,brill:0,best:0,good:0,inacc:0,mist:0,blun:0}; G.plies.forEach(p=>{ if(p.mine===who){ const k=p.cls==='miss'?'blun':p.cls; c[k]=(c[k]||0)+1; } }); return c; };
   const cm=cnt(1), co=cnt(0);
   h+=`<div class="tiles">
     <div class="tile"><div class="k">정확도</div><div class="v">${s.accuracy}%</div><div class="d">상대 ${s.opp_accuracy}%</div></div>
-    <div class="tile"><div class="k">내 수 분류</div><div class="v sm"><span style="color:var(--c-blun)">${cm.blun}</span> / <span style="color:var(--c-mist)">${cm.mist}</span> / <span style="color:var(--c-inacc)">${cm.inacc}</span></div><div class="d">대실수 / 실수 / 부정확 · 최선 ${cm.best}${cm.brill?` · <b style="color:var(--c-brill)">탁월 ${cm.brill}</b>`:''}</div></div>
-    <div class="tile"><div class="k">상대 수 분류</div><div class="v sm"><span style="color:var(--c-blun)">${co.blun}</span> / <span style="color:var(--c-mist)">${co.mist}</span> / <span style="color:var(--c-inacc)">${co.inacc}</span></div><div class="d">대실수 / 실수 / 부정확 · 최선 ${co.best}${co.brill?` · <b style="color:var(--c-brill)">탁월 ${co.brill}</b>`:''}</div></div>
+    <div class="tile"><div class="k">내 수 분류</div><div class="v sm"><span style="color:var(--c-blun)">${cm.blun}</span> / <span style="color:var(--c-mist)">${cm.mist}</span> / <span style="color:var(--c-inacc)">${cm.inacc}</span></div><div class="d">대실수 / 실수 / 부정확 · 최선 ${cm.best}${cm.brill?` · <b style="color:var(--c-brill)">탁월 ${cm.brill}</b>`:''}${cm.great?` · <b style="color:var(--c-great)">대단 ${cm.great}</b>`:''}</div></div>
+    <div class="tile"><div class="k">상대 수 분류</div><div class="v sm"><span style="color:var(--c-blun)">${co.blun}</span> / <span style="color:var(--c-mist)">${co.mist}</span> / <span style="color:var(--c-inacc)">${co.inacc}</span></div><div class="d">대실수 / 실수 / 부정확 · 최선 ${co.best}${co.brill?` · <b style="color:var(--c-brill)">탁월 ${co.brill}</b>`:''}${co.great?` · <b style="color:var(--c-great)">대단 ${co.great}</b>`:''}</div></div>
     <div class="tile"><div class="k">시계 (나 / 상대)</div><div class="v sm">${clk(s.my_clock_20)} / ${clk(s.opp_clock_20)}</div><div class="d">20수 시점 · 종료시 ${clk(s.my_final_clock)} / ${clk(s.opp_final_clock)}</div></div>
   </div>`;
-  const bril=G.plies.map((p,i)=>({p,i})).filter(x=>x.p.cls==='brill');
+  const bril=G.plies.map((p,i)=>({p,i})).filter(x=>x.p.cls==='brill'||x.p.cls==='great');
   if(bril.length){
-    h+=`<div class="card"><h3 style="margin-top:0">탁월한 수 <span class="sub">(누르면 그 장면으로)</span></h3><div class="sub" style="margin-bottom:6px">${esc(BRILL_D)}</div>`;
-    bril.forEach(({p,i})=>{ const L=G.lines[String(i+1)]||{}; h+=`<div class="key" data-jump="${i+1}"><span class="cls brill">탁월</span> <span class="mono">${mv(p)}</span> <span class="sub">(${p.mine?'나':'상대'}) · ${ev(p.cp_before)} → ${ev(p.cp_after)}${L.take?` · ${esc(L.take)} 로 잡으면 ${ev(L.take_cp)}`:''}</span></div>`; });
+    const hasB=bril.some(x=>x.p.cls==='brill'), hasG=bril.some(x=>x.p.cls==='great');
+    h+=`<div class="card good"><h3 style="margin-top:0">${hasB&&hasG?'탁월한 수와 대단한 수':hasB?'탁월한 수':'대단한 수'} <span class="sub">(누르면 그 장면으로)</span></h3><div class="sub" style="margin-bottom:6px">${hasB?esc(BRILL_D)+' ':''}${hasG?esc(GREAT_D):''}</div>`;
+    bril.forEach(({p,i})=>{ const L=G.lines[String(i+1)]||{}; const prev=G.plies[i-1]; h+=`<div class="key" data-jump="${i+1}"><span class="cls ${p.cls}">${CLS[p.cls][0]}</span> <span class="mono">${mv(p)}</span> <span class="sub">(${p.mine?'나':'상대'}) · ${ev(p.cp_before)} → ${ev(p.cp_after)}${L.take?` · ${esc(L.take)} 로 잡으면 ${ev(L.take_cp)}`:''}${p.cls==='great'&&prev?` · 상대의 ${esc(prev.san)} 응징`:''}</span></div>`; });
+    h+='</div>';
+  }
+  // 장고했는데 평가가 그대로였던 수: 45초 이상 쓰고도 승률이 거의 변하지 않은 내 수. 시간을 어디서 흘리는지 보여 준다
+  const slow=G.plies.map((p,i)=>({p,i})).filter(x=>x.p.mine&&x.p.spent!=null&&x.p.spent>=45&&(x.p.wp_loss||0)<3);
+  if(slow.length){
+    const tot=Math.round(slow.reduce((a,x)=>a+x.p.spent,0));
+    h+=`<div class="card slow"><h3 style="margin-top:0">장고했는데 평가가 그대로였던 수 <span class="sub">(누르면 그 장면으로)</span></h3><div class="sub" style="margin-bottom:6px">45초 이상 쓰고도 승률이 3%p 안에서 유지된 내 수 ${slow.length}개, 합계 ${tot}초. 이런 자리는 더 빨리 둬도 됩니다.</div>`;
+    slow.forEach(({p,i})=>{ h+=`<div class="key" data-jump="${i+1}"><span class="mono">${mv(p)}</span> <span class="sub">· <b>${Math.round(p.spent)}초</b> · ${ev(p.cp_before)} → ${ev(p.cp_after)} · 남은시간 ${clk(p.clock)}</span></div>`; });
     h+='</div>';
   }
   const key=G.plies.map((p,i)=>({p,i})).filter(x=>x.p.mine&&x.p.wp_loss>=10).sort((a,b)=>b.p.wp_loss-a.p.wp_loss).slice(0,5);
@@ -113,7 +122,7 @@ function renderMain(){
     key.forEach(({p,i})=>{ h+=`<div class="key" data-jump="${i+1}"><span class="cls ${CLS[p.cls][1]}">${CLS[p.cls][0]}</span> <span class="mono">${mv(p)}</span> 대신 <span class="mono">${esc(p.best)}</span> ${catTag(p.cat)} <span class="sub">· ${ev(p.cp_before)} → ${ev(p.cp_after)} · 남은시간 ${clk(p.clock)}${p.spent!=null?` · ${Math.round(p.spent)}초 사용`:''}</span></div>`; });
     h+='</div>';
   }
-  h+=`<div class="card"><h3 style="margin-top:0">수 목록 <span class="sub">점: 수의 평가 · 작은 숫자: 그 수에 쓴 시간</span></h3><div class="legend">`+Object.entries({brill:'탁월',best:'최선',good:'좋음',inacc:'부정확',mist:'실수',blun:'대실수'}).map(([k,v])=>`<span><i style="background:${CLSCOLOR[k]}"></i>${v}</span>`).join('')+`</div><div class="mlist">`;
+  h+=`<div class="card"><h3 style="margin-top:0">수 목록 <span class="sub">점: 수의 평가 · 작은 숫자: 그 수에 쓴 시간</span></h3><div class="legend">`+Object.entries({brill:'탁월',great:'대단',best:'최선',good:'좋음',inacc:'부정확',mist:'실수',blun:'대실수'}).map(([k,v])=>`<span><i style="background:${CLSCOLOR[k]}"></i>${v}</span>`).join('')+`</div><div class="mlist">`;
   for(let i=0;i<n;i+=2){
     const w=G.plies[i], b=G.plies[i+1];
     const cell=(p,idx)=> p?`<div class="mv" data-jump="${idx}"><i style="background:${CLSCOLOR[p.cls]}"></i><span class="mono">${esc(p.san)}</span><span class="t">${p.spent!=null?Math.round(p.spent)+'s':''}</span></div>`:'<div></div>';
@@ -182,7 +191,8 @@ function draw(){
   else {
     const who=p.mine?'나':'상대'; const c=CLS[p.cls];
     info=`<div><span class="cls ${c[1]}">${c[0]}</span> <b>${mv(p)}</b> <span class="sub">(${who}) · 평가 ${ev(p.cp_before)} → ${ev(p.cp_after)}${p.wp_loss?` · 승률 −${p.wp_loss}%p`:''}</span></div>`;
-    if(p.cls==='brill'){ const L=G.lines[String(IDX)]||{}; info+=`<div class="sub" style="margin-top:3px">${esc(BRILL_D)}</div>`+(L.take?`<div style="margin-top:3px">${esc(L.take)} 로 잡으면 평가 <b>${ev(L.take_cp)}</b>${L.refutation&&L.refutation.length?` · 수순 <span class="mono">${esc(L.refutation.map(s=>s.san).join(' '))}</span>`:''}</div>`:''); }
+    if(p.cls==='great'){ const prev=G.plies[IDX-2]; info+=`<div class="sub" style="margin-top:3px">${esc(GREAT_D)}${prev?` 상대의 ${esc(prev.san)} (${ev(-prev.cp_before)} → ${ev(p.cp_before)}) 를 응징했습니다.`:''}</div>`; }
+    else if(p.cls==='brill'){ const L=G.lines[String(IDX)]||{}; info+=`<div class="sub" style="margin-top:3px">${esc(BRILL_D)}</div>`+(L.take?`<div style="margin-top:3px">${esc(L.take)} 로 잡으면 평가 <b>${ev(L.take_cp)}</b>${L.refutation&&L.refutation.length?` · 수순 <span class="mono">${esc(L.refutation.map(s=>s.san).join(' '))}</span>`:''}</div>`:''); }
     else if(p.cls!=='best'&&p.cls!=='good'&&p.best) info+=`<div style="margin-top:3px">정답은 <b class="mono">${esc(p.best)}</b> (초록 화살표)</div>`;
     else if(nx&&SHOW_BEST) info+=`<div class="sub" style="margin-top:3px">다음 국면 엔진 추천: ${esc(nx.best)} (초록 화살표)</div>`;
     if(p.mine&&p.cat) info+=`<div style="margin-top:5px">${catTag(p.cat,COACH&&COACH.focus&&COACH.focus.includes(p.cat)?'rep':'')} <span class="sub">${esc(catOf(p.cat).d)}</span></div>`;

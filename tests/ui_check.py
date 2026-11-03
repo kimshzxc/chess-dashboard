@@ -248,6 +248,8 @@ def run(c, base, server, shots):
     v = c.ev(VIS); check("홈에는 홈 섹션만 보인다", v and set(v) == {"home"}, v)
     o = c.ev(OVER); check("가로 넘침 없음 (홈)", o[0] <= o[1], o)
     check("히어로 레이팅 숫자", str(S["overview"]["rating"]) in (c.ev("document.querySelector('.herocard .big')?.textContent") or ""))
+    nd = c.ev("document.querySelectorAll('#rchart circle:not(.xc-d)').length"); ns = len(S["rating_series"])
+    check("레이팅 그래프: 판이 많으면 점 대신 선", nd == (ns if ns <= 150 else 0) and ("판마다의 레이팅" in c.ev("document.querySelector('.herocard .lg').textContent") if ns > 150 else True), (nd, ns))
     # 기록 내보내기·가져오기 (테마 패널의 '기록'): 내보낸 기록을 지운 뒤 가져오면 돌아오고, 양쪽 기록은 합쳐진다
     c.ev("localStorage.setItem('learn-done',JSON.stringify({a:'2026-01-02'})); localStorage.setItem('puzzle-history',JSON.stringify({'2026-01-01':{ok:1,n:2}})); localStorage.setItem('train-done',JSON.stringify({o1:{0:{clean:1,n:3,last:'2026-01-01'}}}))")
     dump = c.ev("progressDump()")
@@ -266,6 +268,16 @@ def run(c, base, server, shots):
         c.go(base + "index.html" + q() + "#stats", READY); c.pump(0.4); c.tap("[data-for='stats'] [data-sub='phase']"); c.pump(0.3)
         if S.get("endgames"):
             check("엔드게임 종류별 표", c.ev("document.querySelectorAll('.endgames tr').length") == len(S["endgames"]) + 1 and (S["endgames"][0]["label"] in c.ev("document.querySelector('.endgames').innerText")), len(S["endgames"]))
+        vr = S.get("vs_rating") or []
+        c.tap("[data-for='stats'] [data-sub='session']"); c.pump(0.3)
+        nb = c.ev("document.querySelectorAll('.vsr tr').length")
+        check("상대 레이팅별 성적 표", bool(vr) and sum(x["n"] for x in vr) == S["overview"]["games"] and nb == 1 + sum(1 for x in vr if x["n"]) and vr[0]["label"] in c.ev("document.querySelector('.vsr').textContent"), (nb, [x["n"] for x in vr]))
+        o = c.ev(OVER); check("가로 넘침 없음 (통계 컨디션)", o[0] <= o[1], o)
+        snap("vs_rating")
+        c.tap("[data-for='stats'] [data-sub='phase']"); c.pump(0.3)
+        gr = S.get("great") or {}
+        gtile = c.ev("[...document.querySelectorAll('.tile')].find(t=>t.textContent.includes('대단한 수'))?.textContent") or ""
+        check("대단한 수 타일", str(gr.get("n", 0)) in gtile and "응징" in gtile, gtile[:50])
         br = S.get("brilliant") or {}
         tile = c.ev("[...document.querySelectorAll('.tile')].find(t=>t.textContent.includes('탁월한 수'))?.textContent") or ""
         check("탁월한 수 타일", str(br.get("n", 0)) in tile and ("판에 하나꼴" in tile or "아직 없음" in tile), tile[:60])
@@ -347,9 +359,10 @@ def run(c, base, server, shots):
             cap0 = c.ev("document.querySelector('#s-recent .viewer .cap')?.textContent"); c.tap("#s-recent .viewer [data-go='1']")
             check("장면 보기: 다음 수로 넘어간다", cap0 != c.ev("document.querySelector('#s-recent .viewer .cap')?.textContent"))
             check("장면 보기: 판 옆에 승률 막대", c.ev("!!document.querySelector('#s-recent .viewer .boardwrap > .evalbar + svg.board') && document.querySelector('#s-recent .viewer .evalbar span').textContent.length>0"))
-            c.tap('#tabs button[data-w="7d"]', None); c.pump(0.8); v = c.ev(VIS)
+            c.tap('#tabs button[data-w="7d"]', None); c.wait("document.body.dataset.w==='7d'", 8); c.pump(0.3); v = c.ev(VIS)
+            check("최근 7일 통계는 따로 받는다 (stats-7d.json)", "window" in fetch_json("stats-7d.json") and list(stats["windows"]) == ["all"], list(stats["windows"]))
             check("기간을 바꿔도 탭이 유지된다", (v and set(v) == {"games"}) or c.ev("!!document.querySelector('#main .empty')"), v)
-            c.tap('#tabs button[data-w="all"]', None); c.pump(0.8)
+            c.tap('#tabs button[data-w="all"]', None); c.wait("document.body.dataset.w==='all'", 8); c.pump(0.3)
         if tab == "mistakes":
             check("복기 보드가 그려진다", c.ev("document.querySelectorAll('#main>section:not([hidden]) svg.board').length") > 0)
             check("SVG id 가 겹치지 않는다 (흑 기물 색)", c.ev("new Set([...document.querySelectorAll('svg [id]')].map(e=>e.id)).size === document.querySelectorAll('svg [id]').length"))
@@ -503,6 +516,12 @@ def run(c, base, server, shots):
     c.call("Input.dispatchTouchEvent", type="touchEnd", touchPoints=[]); c.pump(0.4)
     check("보드를 왼쪽으로 밀면 다음 수", c.ev(CUR) == min(n, cur0 + 1), f"{cur0} → {c.ev(CUR)}")
     errs = c.errors(); check("게임 페이지에서 오류 없음", not errs, errs[:4])
+    gj = fetch_json(f"games/{gid}.json")
+    slow = [p for p in gj["plies"] if p["mine"] and p.get("spent") is not None and p["spent"] >= 45 and (p.get("wp_loss") or 0) < 3]
+    c.go(base + f"game.html?id={gid}&ply=1" + q("?"), "!!document.querySelector('#board svg.board')"); c.pump(0.3)
+    check("게임 페이지: 장고했는데 평가가 그대로였던 수 카드", c.ev("document.querySelectorAll('.card.slow .key').length") == len(slow) and (not slow or f"합계 {round(sum(p['spent'] for p in slow))}초" in c.ev("document.querySelector('.card.slow').textContent")), len(slow))
+    gl = [i for i, p in enumerate(gj["plies"]) if p["cls"] == "great"]
+    check("게임 페이지: 대단한 수 배지", (not gl) or (c.ev("document.querySelectorAll('.card.good .cls.great').length") == len(gl)), len(gl))
     bw = next(iter((S.get("brilliant") or {}).get("list", [])), None)
     if bw:
         bply = (bw["move"] - 1) * 2 + (1 if bw["mover"] == "w" else 2)
@@ -789,6 +808,13 @@ def run(c, base, server, shots):
     c.go(base + f"game.html?id={gid}&ply=5" + q("?"), "!!document.querySelector('#board svg.board')")
     check("화면이 낮으면 보드 고정을 끈다", c.ev("getComputedStyle(document.querySelector('.stick')).position") == "static")
     c.viewport(1280, 800, mobile=False); c.go(base + "index.html" + q(), READY); c.pump(0.4); snap("desktop")
+    c.go(base + "index.html" + q() + "#stats", READY); c.pump(0.4); c.tap("[data-for='stats'] [data-sub='phase']"); c.pump(0.3)
+    lefts = c.ev("[...document.querySelectorAll('#main>section:not([hidden]):not(.subnav)')].map(s=>Math.round(s.getBoundingClientRect().left))") or []
+    check("데스크톱: 통계 탭은 두 단", len(set(lefts)) >= 2, lefts)
+    o = c.ev(OVER); check("가로 넘침 없음 (데스크톱 통계)", o[0] <= o[1], o)
+    snap("desktop_stats")
+    c.go(base + "index.html" + q() + "#home", READY); c.pump(0.3)
+    hw = c.ev("document.querySelector('#hero').getBoundingClientRect().width"); check("데스크톱: 홈은 가운데 한 단", 600 <= hw <= 740, hw)
 
 
 if __name__ == "__main__":

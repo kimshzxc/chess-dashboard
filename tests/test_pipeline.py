@@ -252,6 +252,30 @@ class WithDb(unittest.TestCase):
         self.assertEqual((S["brilliant"]["n"], S["brilliant"]["opp"], S["brilliant"]["list"]), (0, 0, []))
         self.assertIn("brill", [r[1] for r in self.con.execute("PRAGMA table_info(plies)")])
 
+    def test_great_and_vs_rating(self):
+        P = pipeline
+        fen = "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2"
+        opp = dict(mover="b", mine=0, san="Qh4", best="Nc6", is_best=0, cp_before=-30, cp_after=-250, loss=220, wp_loss=25.0, fen=fen)
+        me = dict(mover="w", mine=1, san="Nxh4", best="Nxh4", is_best=1, cp_before=250, cp_after=260, loss=0, wp_loss=0.0,
+                  fen="rnb1kbnr/pppp1ppp/8/4p3/4P2q/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3")
+        self.assertEqual([p["great"] for p in P.tag_great([dict(opp), dict(me)])], [0, 0])              # 공짜 퀸을 그냥 잡는 수는 대단하지 않다
+        quiet = dict(me, san="Nc3", best="Nc3", fen="rnb1kbnr/pppp1ppp/8/4p3/4P2q/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3")
+        self.assertEqual([p["great"] for p in P.tag_great([dict(opp), quiet])], [0, 1])                 # 조용한 최선 수로 이득을 굳힘
+        self.assertEqual(P.tag_great([dict(opp, loss=60), dict(quiet)])[1]["great"], 0)                 # 상대 수가 실수가 아니면 아니다
+        self.assertEqual(P.tag_great([dict(opp, cp_before=-700), dict(quiet, cp_after=900)])[1]["great"], 0)   # 이미 압도적
+        self.assertEqual(P.tag_great([dict(opp), dict(quiet, is_best=0, loss=40)])[1]["great"], 0)      # 최선이 아니면 아니다
+        self.assertEqual(P.classify(dict(quiet, great=1)), "great")
+        games = P.load_games(self.con)
+        vr = P.vs_rating_stats(games)
+        self.assertEqual([r["key"] for r in vr], ["up", "even", "down"])
+        self.assertEqual(sum(r["n"] for r in vr), len(games))
+        for r in vr:
+            if r["n"]:
+                self.assertTrue(0 <= r["score"] <= 100)
+        S = P.compute_stats(games, self.con)
+        self.assertEqual(S["vs_rating"], vr)
+        self.assertEqual(set(S["great"]), {"n", "opp", "pg"})
+
     def test_finish(self):
         f = pipeline.compute_stats(pipeline.load_games(self.con), self.con)["finish"]
         self.assertEqual(set(f), {"W", "L", "D"})
@@ -329,9 +353,14 @@ class WithDb(unittest.TestCase):
         self.assertEqual(pipeline.export_missing_games(self.con), 24)
         pipeline.render_all(self.con, dict(CHESSCOM_USERNAME="me"))
         coach = json.load(open(os.path.join(pipeline.DOCS, "coach.json")))
-        stats = json.load(open(os.path.join(pipeline.DOCS, "stats.json")))["windows"]["all"]["coach"]
+        full = json.load(open(os.path.join(pipeline.DOCS, "stats.json")))
+        stats = full["windows"]["all"]["coach"]
         self.assertEqual(coach["focus"], stats["focus"])
         self.assertEqual(set(coach["cats"]), {c["key"] for c in stats["cats"]})
+        self.assertEqual(list(full["windows"]), ["all"])                                  # 최근 구간은 따로 받는다
+        for w in ("30d", "7d"):
+            d = json.load(open(os.path.join(pipeline.DOCS, f"stats-{w}.json")))
+            self.assertEqual(set(d), {"generated", "window"})
 
     def test_book_cache_and_budget(self):
         import chess
