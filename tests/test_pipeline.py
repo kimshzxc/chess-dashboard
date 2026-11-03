@@ -266,6 +266,11 @@ class WithDb(unittest.TestCase):
         self.assertEqual(P.tag_great([dict(opp), dict(quiet, is_best=0, loss=40)])[1]["great"], 0)      # 최선이 아니면 아니다
         self.assertEqual(P.classify(dict(quiet, great=1)), "great")
         games = P.load_games(self.con)
+        gap = P.pregame_gap(games)
+        first = min(games, key=lambda g: g["end_time"])
+        self.assertEqual(gap[first["url"]], first["opp_elo"] - first["my_elo"])                   # 첫 판은 대국 후 값 그대로
+        g2 = sorted(games, key=lambda g: g["end_time"])[1]
+        self.assertEqual(gap[g2["url"]], g2["opp_elo"] + (g2["my_elo"] - first["my_elo"]) - first["my_elo"])
         vr = P.vs_rating_stats(games)
         self.assertEqual([r["key"] for r in vr], ["up", "even", "down"])
         self.assertEqual(sum(r["n"] for r in vr), len(games))

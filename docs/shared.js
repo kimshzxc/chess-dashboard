@@ -239,7 +239,7 @@ function drawAll(root){ (root||document).querySelectorAll('.viewer').forEach(el=
 /* 실수 국면 뷰어: 정답 수순 / 내 수와 반격 */
 /* 탁월한 수 설명 (게임 페이지·대시보드 공용) */
 const BRILL_D='기물을 내주는데도 엔진 평가가 유지되는 수 (체스닷컴의 !!). 두기 전 이미 압도적이지 않았고, 둔 뒤에도 지는 자리가 아닌 희생만 셉니다.';
-const GREAT_D='상대의 실수를 최선 수로 바로 응징한 수 (체스닷컴의 ! 중 응징형). 공짜 기물을 그냥 잡는 수는 세지 않습니다.';
+const GREAT_D='상대의 대실수 직후, 잡는 수가 아닌 조용한 최선 수로 아직 기물로 드러나지 않은 이득을 굳힌 수 (체스닷컴의 ! 중 응징형). 기물을 그냥 잡는 수는 세지 않습니다.';
 /* 탁월한 수 장면: 둔 수 → 그 뒤 최선 수순, 상대가 희생 기물을 잡았을 때의 수순 */
 function brilliantViewer(w){
   const flip=w.color==='b'||w.mover==='b';

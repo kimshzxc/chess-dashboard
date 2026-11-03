@@ -40,8 +40,9 @@ BRILL_SAC = 2          # 탁월한 수: 정적 교환으로 상대가 이만큼(
 BRILL_WIN_BEFORE = 500 # 탁월한 수: 두기 전 평가가 이보다 높으면(이미 압도적) 치지 않는다
 BRILL_LOSE_AFTER = -100  # 탁월한 수: 둔 뒤 평가가 이보다 낮으면(지는 자리) 치지 않는다
 BRILL_V = "2"          # 탁월한 수 판정 규칙 버전. 바꾸면 다음 실행에서 모든 판을 다시 판정한다
-GREAT_GAIN = 100       # 대단한 수: 상대 실수 전보다 이만큼(cp) 이상 좋아진 것을 최선 수로 굳힌 수. 공짜 기물을 그냥 잡는 수는 뺀다
-RATING_GAP = 50        # 상대 레이팅별 성적: 내 레이팅과 이 이상 차이 나면 높은/낮은 상대
+GREAT_GAIN = 100       # 대단한 수: 상대 대실수 전보다 이만큼(cp) 이상 좋아진 것을 최선 수로 굳힌 수
+GREAT_HIDDEN = 150     # 대단한 수: 둔 뒤 평가가 기물 수보다 이만큼 높아야(이득이 아직 기물로 드러나지 않음 = 전술을 찾은 것) 한다
+RATING_GAP = 25        # 상대 레이팅별 성적: 내 레이팅과 이 이상 차이 나면 높은/낮은 상대 (체스닷컴 매칭은 대개 ±40 안이다)
 WORKERS = 3
 UA = "chess-dashboard/1.0 (personal analysis; github.com/{owner}/{repo})"
 KST = timezone(timedelta(hours=9))
@@ -578,22 +579,26 @@ def tag_mistakes(plies):
 
 
 def tag_great(plies):
-    """대단한 수(체스닷컴의 !)의 응징형: 상대가 실수(100cp 이상 손해)한 직후 최선 수로 그 이득을 굳힌 수.
-    둘째 수 평가가 없어 '유일한 좋은 수'는 보지 못한다. 공짜 기물을 그냥 잡는 수(정적 교환 2폰 이상 이득)와 탁월한 수는 뺀다.
+    """대단한 수(체스닷컴의 !)의 응징형: 상대가 대실수(200cp 이상 손해)한 직후, 잡는 수가 아닌 조용한 최선 수로 그 이득을 굳혔고
+    둔 뒤 평가가 기물 수보다 GREAT_HIDDEN 이상 높은(이득이 아직 기물로 드러나지 않아 전술을 본 것) 수.
+    둘째 수 평가가 없어 '유일한 좋은 수'는 보지 못한다. 기물을 잡는 수(공짜든 아니든)와 탁월한 수는 뺀다.
     둔 쪽 기준 평가가 상대 실수 전에 이미 BRILL_WIN_BEFORE 이상이었으면(이미 압도적) 치지 않는다."""
     prev = None
     for p in plies:
         p["great"] = 0
-        if prev and (prev.get("loss") or 0) >= 100 and p.get("is_best") and not p.get("brill") and prev.get("cp_before") is not None:
+        if prev and (prev.get("loss") or 0) >= 200 and p.get("is_best") and not p.get("brill") and prev.get("cp_before") is not None:
             before = -prev["cp_before"]                      # 상대가 실수하기 전, 이 수를 둔 쪽 기준 평가
-            if before < BRILL_WIN_BEFORE and (p.get("cp_after") or 0) - before >= GREAT_GAIN:
+            after_cp = p.get("cp_after") or 0
+            if before < BRILL_WIN_BEFORE and after_cp - before >= GREAT_GAIN:
                 try:
                     b = chess.Board(p["fen"])
                     mv = b.parse_san(p["san"])
-                    obvious = b.is_capture(mv) and see(b, mv) >= BRILL_SAC
+                    quiet = not b.is_capture(mv)
+                    b.push(mv)
+                    hidden = after_cp - _material(b, not b.turn) >= GREAT_HIDDEN
                 except Exception:
-                    obvious = False
-                p["great"] = int(not obvious)
+                    quiet = hidden = False
+                p["great"] = int(quiet and hidden)
         prev = p
     return plies
 
@@ -1063,13 +1068,27 @@ def _bucket(gs, label):
                 blunders_pg=round(sum(g["summary"].get("blunders", 0) for g in gs) / len(gs), 2) if gs else None)
 
 
+def pregame_gap(games):
+    """판마다 대국 전 레이팅 차이(상대 - 나)의 추정값 {url: gap}. 체스닷컴 API 의 레이팅은 대국 후 값이라 그대로 쓰면
+    이긴 판은 상대가 낮아 보이고 진 판은 높아 보인다. 내 대국 전 레이팅은 직전 판(시간순)의 대국 후 값으로 보고,
+    상대의 변화는 내 변화와 반대 부호·같은 크기로 본다."""
+    out, prev = {}, None
+    for g in sorted(games, key=lambda g: g["end_time"]):
+        my_pre = prev if prev is not None else g["my_elo"]
+        d_me = g["my_elo"] - my_pre
+        out[g["url"]] = (g["opp_elo"] + d_me) - my_pre
+        prev = g["my_elo"]
+    return out
+
+
 def vs_rating_stats(games):
-    """상대 레이팅별 성적: 내 레이팅보다 RATING_GAP 이상 높은 상대 / 비슷한 상대 / RATING_GAP 이상 낮은 상대."""
+    """상대 레이팅별 성적: 대국 전 추정 레이팅이 나보다 RATING_GAP 이상 높은 상대 / 비슷한 상대 / RATING_GAP 이상 낮은 상대."""
+    gap = pregame_gap(games)
     b = defaultdict(list)
     for g in games:
-        d = g["opp_elo"] - g["my_elo"]
+        d = gap[g["url"]]
         b["up" if d >= RATING_GAP else "down" if d <= -RATING_GAP else "even"].append(g)
-    return [dict(_bucket(b[k], l), key=k, gap=round(sum(g["opp_elo"] - g["my_elo"] for g in b[k]) / len(b[k])) if b[k] else None)
+    return [dict(_bucket(b[k], l), key=k, gap=round(sum(gap[g["url"]] for g in b[k]) / len(b[k])) if b[k] else None)
             for k, l in (("up", f"{RATING_GAP} 이상 높은 상대"), ("even", "비슷한 상대"), ("down", f"{RATING_GAP} 이상 낮은 상대"))]
 
 
@@ -2137,7 +2156,7 @@ def export_game(con, g):
     return path
 
 
-GAME_EXPORT_V = "6"    # 게임 상세 JSON 의 형식 버전. 올리면 다음 실행에서 모든 게임을 다시 내보낸다 (2: 실수 유형 cat, 3: 교환 평가로 다시 분류, 4: 상대 수법을 여섯 유형으로, 5: 탁월한 수, 6: 대단한 수)
+GAME_EXPORT_V = "7"    # 게임 상세 JSON 의 형식 버전. 올리면 다음 실행에서 모든 게임을 다시 내보낸다 (2: 실수 유형 cat, 3: 교환 평가로 다시 분류, 4: 상대 수법을 여섯 유형으로, 5: 탁월한 수, 6: 대단한 수, 7: 대단한 수 규칙을 조용한 수로 좁힘)
 
 
 def export_missing_games(con):

@@ -565,16 +565,16 @@ function render(){
     <div class="tile"><div class="k">공짜 기물 안 잡음</div><div class="v">${tc.missed_free}</div><div class="d">잡는 수가 최선(+2 이상)인데 다른 수</div></div>
     <div class="tile"><div class="k">외통 놓침</div><div class="v">${tc.missed_mate_total}</div><div class="d">${Object.entries(tc.missed_mate).map(([k,v])=>`${k}${k==='5'?'+':''}수 외통 ${v}`).join(' · ')||'-'}</div></div>
     <div class="tile"><div class="k">탁월한 수 <span class="cls brill" style="font-size:10px;padding:1px 6px">!!</span></div><div class="v" style="color:var(--c-brill)">${br.n}</div><div class="d">${br.games}판에서 · 상대 ${br.opp}개<br>${br.n?`${Math.round(1/br.pg)}판에 하나꼴`:'아직 없음'}</div></div>
-    <div class="tile"><div class="k">대단한 수 <span class="cls great" style="font-size:10px;padding:1px 6px">!</span></div><div class="v" style="color:var(--c-great)">${gr.n}</div><div class="d">상대 실수를 바로 응징 · 판당 ${gr.pg} · 상대 ${gr.opp}개<br>장면은 게임 페이지에서</div></div>
+    <div class="tile"><div class="k">대단한 수 <span class="cls great" style="font-size:10px;padding:1px 6px">!</span></div><div class="v" style="color:var(--c-great)">${gr.n}</div><div class="d">상대 대실수를 조용한 수로 응징 · 판당 ${gr.pg} · 상대 ${gr.opp}개<br>장면은 게임 페이지에서</div></div>
   </div>${brillCard(br)}</section>`;
   if(S.vs_rating){
     const vr=S.vs_rating, by=Object.fromEntries(vr.map(r=>[r.key,r]));
     const sbr=(rows)=>`<table><tr><th>상대</th><th class="n">판</th><th class="n">승률</th><th class="n">정확도</th><th class="n">대실수/판</th></tr>`+rows.filter(r=>r.n).map(r=>`<tr><td>${esc(r.label)}${r.gap!=null?`<div class="sub" style="font-size:12px">평균 ${r.gap>0?'+':''}${r.gap}</div>`:''}</td><td class="n">${r.n}</td><td class="n">${pct(r.score)}</td><td class="n">${r.accuracy!=null?r.accuracy+'%':'-'}</td><td class="n">${r.blunders_pg!=null?r.blunders_pg:'-'}</td></tr>`).join('')+`</table>`;
     let note='';
-    if(by.up&&by.even&&by.up.n>=10&&by.even.n>=10&&by.up.score!=null&&by.up.score<by.even.score-10) note=`높은 상대에게 승률이 ${Math.round(by.even.score-by.up.score)}%p 낮습니다. 레이팅 차이를 생각하면 자연스러운 폭인지 정확도를 같이 보세요.`;
+    if(by.up&&by.even&&by.up.n>=10&&by.even.n>=10&&by.up.score!=null&&by.up.score<by.even.score-10) note=`높은 상대에게 승률이 ${Math.round(by.even.score-by.up.score)}%p 낮습니다. 레이팅 25~40 차이면 기대 승률 차이는 4~6%p 정도라, 그보다 크면 강한 상대 앞에서 위축되는 것입니다.`;
     else if(by.down&&by.even&&by.down.n>=10&&by.even.n>=10&&by.down.score!=null&&by.down.score<by.even.score+5) note=`낮은 상대에게도 승률이 비슷한 상대와 거의 같습니다. 쉬운 판에서 방심하는지 대실수 수를 보세요.`;
     else if(by.up&&by.up.n>=10&&by.up.score!=null&&by.up.score>=45) note=`높은 상대에게도 승률 ${pct(by.up.score)}로 잘 버팁니다.`;
-    h+=`<section class="vsr" data-view="stats" data-sub="session"><h2>상대 레이팅별<small>그 판의 내 레이팅과 50 이상 차이 나는 상대를 나눠 봄 · 평균은 상대와의 레이팅 차이</small></h2><div class="card">${sbr(vr)}${note?`<div class="sub" style="margin-top:8px">${note}</div>`:''}</div></section>`;
+    h+=`<section class="vsr" data-view="stats" data-sub="session"><h2>상대 레이팅별<small>그 판의 내 레이팅과 25 이상 차이 나는 상대를 나눠 봄 · 평균은 상대와의 레이팅 차이</small></h2><div class="card">${sbr(vr)}${note?`<div class="sub" style="margin-top:8px">${note}</div>`:''}</div></section>`;
   }
   if(S.monthly.length>1){
     h+=`<section data-view="stats" data-sub="session"><h2>월별 추이</h2><div class="card"><table><tr><th>월</th><th class="n">판</th><th class="n">승률</th><th class="n">정확도</th><th class="n">대실수/판</th><th class="n">레이팅</th></tr>`;
