@@ -83,6 +83,13 @@ function lessonsHTML(){
       <div class="sub">${c?`최근 ${COACH.k}판 중 ${c.recent}판에서 나온 유형 · `:''}<a href="index.html?cat=${k}#mistakes">규칙과 다른 사례 ›</a></div></div>`; }
   return h+'</div>';
 }
+/* 이 판에서 잘한 것: 파이프라인이 고른 긍정 항목(G.good). 실수만 보이는 복기가 되지 않도록 교훈 바로 아래에 둔다 */
+function goodHTML(){
+  const L=G.good||[]; if(!L.length) return '';
+  let h=`<div class="card plus" id="good"><h3 style="margin-top:0">이 판에서 잘한 것 <span class="sub">(누르면 그 장면으로)</span></h3>`;
+  for(const x of L) h+=`<div class="key${x.ply?'':' nojump'}"${x.ply?` data-jump="${x.ply}"`:''}><b><i class="ck">✓</i>${esc(x.title)}</b>${x.text?`<div class="sub">${esc(x.text)}</div>`:''}</div>`;
+  return h+'</div>';
+}
 function renderMain(){
   const s=G.summary, n=G.plies.length;
   let h=`<div class="stick"><div class="boardwrap">${evalBarHTML('evalbar')}<div id="board" style="flex:1;min-width:0"></div></div>`;
@@ -90,6 +97,7 @@ function renderMain(){
   h+=`<div class="vctl"><span class="btn nav" data-go="0">⏮</span><span class="btn nav" data-go="-1">‹</span><span class="btn nav" data-go="1">›</span><span class="btn nav" data-go="9">⏭</span></div></div>`;
   h+=`<div class="info card" id="info"></div>`;
   h+=lessonsHTML();
+  h+=goodHTML();
   h+=`<div class="card"><div class="sub">평가 그래프 (누르면 이동 · 점: 실수/대실수)</div>${graphSVG()}</div>`;
   const cs=clockSVG();
   if(cs) h+=`<div class="card"><div class="sub">남은 시간 (누르면 그 수로 이동)</div>${cs}<div class="legend"><span><i class="lk" style="background:var(--s1)"></i>나</span><span><i class="lk" style="background:var(--s2)"></i>상대</span><span><i class="dotk"></i>내가 45초 이상 쓴 수</span></div></div>`;

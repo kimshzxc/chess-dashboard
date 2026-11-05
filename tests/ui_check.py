@@ -350,6 +350,9 @@ def run(c, base, server, shots):
               f"{len(v or [])} sections")
         o = c.ev(OVER); check(f"가로 넘침 없음 ({tab})", o[0] <= o[1], o)
         if tab == "games":
+            g0 = S["recent"][0]; gg = [x for x in (g0.get("good") or []) if x["key"] != "best"][:3]
+            check("최근 게임: 잘한 점 초록 칩", c.ev("document.querySelectorAll('#s-recent .game .ctag.plus').length") >= len(gg) and (not gg or c.ev("document.querySelector('#s-recent .game .ctag.plus')?.textContent") == "✓ " + gg[0]["title"]), [x["title"] for x in gg])
+            snap("recent")
             n0 = c.ev("[...document.querySelectorAll('#s-recent .game')].filter(g=>g.offsetParent).length")
             c.tap('[data-fold="fold-recent"]')
             n1 = c.ev("[...document.querySelectorAll('#s-recent .game')].filter(g=>g.offsetParent).length")
@@ -520,6 +523,13 @@ def run(c, base, server, shots):
     slow = [p for p in gj["plies"] if p["mine"] and p.get("spent") is not None and p["spent"] >= 45 and (p.get("wp_loss") or 0) < 3]
     c.go(base + f"game.html?id={gid}&ply=1" + q("?"), "!!document.querySelector('#board svg.board')"); c.pump(0.3)
     check("게임 페이지: 장고했는데 평가가 그대로였던 수 카드", c.ev("document.querySelectorAll('.card.slow .key').length") == len(slow) and (not slow or f"합계 {round(sum(p['spent'] for p in slow))}초" in c.ev("document.querySelector('.card.slow').textContent")), len(slow))
+    good = gj.get("good") or []
+    check("게임 페이지: 이 판에서 잘한 것 카드", c.ev("document.querySelectorAll('#good .key').length") == len(good) and (not good or good[0]["title"] in (c.ev("document.querySelector('#good').textContent") or "")), [x["key"] for x in good])
+    gj1 = next((x for x in good if x.get("ply")), None)
+    if gj1:
+        c.tap("#good .key[data-jump]", y_target=640); c.pump(0.3)
+        check("게임 페이지: 잘한 것을 누르면 그 장면으로", c.ev(CUR) == gj1["ply"], f"{c.ev(CUR)} vs {gj1['ply']}")
+        c.ev("document.querySelector('#good').scrollIntoView({block:'start'})"); c.pump(0.3); snap("game_good")
     gl = [i for i, p in enumerate(gj["plies"]) if p["cls"] == "great"]
     check("게임 페이지: 대단한 수 배지", (not gl) or (c.ev("document.querySelectorAll('.card.good .cls.great').length") == len(gl)), len(gl))
     bw = next(iter((S.get("brilliant") or {}).get("list", [])), None)

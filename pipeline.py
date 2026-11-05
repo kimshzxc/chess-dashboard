@@ -1290,6 +1290,8 @@ def compute_stats(games, con=None):
                      w=sum(1 for p in g["plies"] if p.get("cat") and p["cp_before"] >= 300)) for g in games]
 
     # --- 최근 게임 / 최악의 실수
+    avg_s = meta_get(con, "avg") if con is not None else None      # 평소 평균은 기간과 상관없이 전체 기간 것 (render_all 이 meta 에 둔다)
+    avg = json.loads(avg_s) if avg_s else game_avg(games)
     S["recent"] = []
     for g in games[-25:][::-1]:
         evals = [max(-1000, min(1000, p["cp_after"] if p["mine"] else -p["cp_after"])) for p in g["plies"]]
@@ -1299,6 +1301,7 @@ def compute_stats(games, con=None):
                                 **{k: g["summary"].get(k) for k in ("accuracy", "blunders", "mistakes", "hung", "missed_mate", "brilliant", "great",
                                                                     "my_final_clock", "opp_final_clock", "n_moves")},
                                 cats=Counter(p["cat"] for p in g["plies"] if p.get("cat")).most_common(),
+                                good=[dict(key=h["key"], title=h["title"], ply=h["ply"]) for h in highlights(g["plies"], dict(g["summary"], outcome=g["outcome"]), avg)],
                                 worst=with_lines(con, worst_with_cat(g))))
     worst = []
     for g in games:
@@ -1362,6 +1365,108 @@ def worst_with_cat(g):
         return w
     p = next((p for p in g["plies"] if p["mine"] and p["move"] == w["move"] and p["san"] == w["san"]), None)
     return dict(w, cat=p.get("cat") if p else None)
+
+
+GOOD_MAX = 6           # 잘한 점: 게임 하나에 최대 몇 개까지 (우선순위 순)
+GOOD_STREAK = 10       # 잘한 점 "연속 무실수": 내 수가 이만큼 이상, 그리고 내 수의 35% 이상 이어져야 한다
+GOOD_ACC_UP = 4        # 잘한 점 "정확도": 평소 평균보다 이만큼(%p) 이상 높아야 한다
+PHASE_LABEL = dict(opening="오프닝", middlegame="중반전", endgame="엔드게임")
+
+
+def highlights(plies, summary, avg=None):
+    """게임 하나에서 내가 잘한 점: [{key, title, text, ply}] (ply 는 그 장면, 없으면 None). 우선순위 순으로 최대 GOOD_MAX 개.
+    복기 화면이 실수만 보여 주지 않도록 쓴다. avg 는 전체 기간 평균 {accuracy, phase:{ph: acc}} 로, 있으면 평소와 비교한다."""
+    avg = avg or {}
+    mine = [p for p in plies if p["mine"]]
+    if not mine:
+        return []
+    out = []
+    ok = lambda p: (p.get("loss") or 0) < 50                      # 최선·좋음 (승률 손해가 작은 수)
+    s = summary or {}
+    # 1. 탁월한 수 / 대단한 수
+    for key, name in (("brill", "탁월한 수"), ("great", "대단한 수")):
+        v = [p for p in mine if p.get(key)]
+        if v:
+            out.append(dict(key=key, title=f"{name} {len(v)}개", text=" ".join(f"{p['move']}.{'' if p['mover'] == 'w' else '..'}{p['san']}" for p in v), ply=v[0]["ply"]))
+    # 2. 외통 마무리: 강제 외통이 보인 뒤 한 번도 놓치지 않고 끝냈다
+    mate = [p for p in mine if p["cp_before"] >= 9000]
+    if len(mate) >= 2 and all(p["cp_after"] >= 9000 for p in mate):
+        out.append(dict(key="mate", title=f"외통 {len(mate)}수를 놓치지 않고 마무리", text=f"{mate[0]['move']}수부터 끝까지 외통 수순을 정확히 뒀습니다.", ply=mate[0]["ply"]))
+    # 3. 유리해진 뒤 흔들리지 않고 이김 / 불리한 판을 뒤집음
+    win = s.get("outcome") == "W" if "outcome" in s else None
+    first = next((p for p in mine if p["cp_after"] >= 300), None)
+    if win and first:
+        after = [p for p in mine if p["ply"] >= first["ply"]]
+        if len(after) >= 4 and min(p["cp_after"] for p in after) >= 100:
+            out.append(dict(key="convert", title="유리해진 뒤 흔들리지 않고 마무리", text=f"{first['move']}수에 +3 이상이 된 뒤 끝까지 +1 아래로 내려간 적이 없습니다.", ply=first["ply"]))
+    low = min(mine, key=lambda p: p["cp_after"])
+    if win and low["cp_after"] <= -300:
+        out.append(dict(key="comeback", title="불리한 판을 뒤집어 이김", text=f"{low['move']}수에 {low['cp_after'] / 100:+.1f} 까지 밀렸지만 포기하지 않고 뒤집었습니다.", ply=low["ply"]))
+    # 4. 상대 실수를 바로 살렸는가: 상대가 200 이상 잃은 직후의 내 수가 최선·좋음
+    chances, took = [], []
+    for i, p in enumerate(plies[:-1]):
+        if not p["mine"] and (p.get("loss") or 0) >= 200 and plies[i + 1]["mine"]:
+            chances.append(plies[i + 1])
+            if ok(plies[i + 1]):
+                took.append(plies[i + 1])
+    if chances and (len(took) == len(chances) or (len(chances) >= 3 and len(took) * 3 >= len(chances) * 2)):
+        allk = len(took) == len(chances)
+        out.append(dict(key="punish", title=("상대의 실수를 바로 살림" if len(chances) == 1 else
+                                              f"상대 실수 {len(chances)}번{'을 모두' if allk else f' 중 {len(took)}번을'} 바로 살림"),
+                        text="상대가 실수한 직후의 수를 " + ("모두 " if allk else "") + "최선이나 좋음으로 뒀습니다.", ply=took[0]["ply"]))
+    # 5. 정확도가 평소보다 높음
+    a = s.get("accuracy")
+    if a is not None and ((avg.get("accuracy") is not None and a >= avg["accuracy"] + GOOD_ACC_UP) or (avg.get("accuracy") is None and a >= 93)):
+        out.append(dict(key="acc", title=f"정확도 {a}%", text=f"평소 평균 {avg['accuracy']}% 보다 높습니다." if avg.get("accuracy") is not None else "아주 정확한 판이었습니다.", ply=None))
+    # 6. 국면별: 6수 이상 둔 국면의 정확도가 90% 이상이고 평소보다 높음
+    for ph, label in PHASE_LABEL.items():
+        v = [p for p in mine if p.get("phase") == ph]
+        if len(v) < 6:
+            continue
+        pa = acc([p["wp_loss"] for p in v])
+        base = (avg.get("phase") or {}).get(ph)
+        if pa >= 90 and (base is None or pa >= base + 3):
+            out.append(dict(key=f"phase_{ph}", title=f"{label} 정확도 {pa}%",
+                            text=f"{label} {len(v)}수" + (f", 평소 {base}% 보다 높습니다." if base is not None else "를 정확히 뒀습니다."), ply=v[0]["ply"]))
+    # 7. 가장 긴 연속 무실수 구간
+    best_run, run = [], []
+    for p in mine:
+        run = run + [p] if ok(p) else []
+        if len(run) > len(best_run):
+            best_run = run
+    if len(best_run) >= GOOD_STREAK and len(best_run) * 100 >= len(mine) * 35:
+        out.append(dict(key="streak", title=f"{len(best_run)}수 연속 실수 없음", text=f"{best_run[0]['move']}수부터 {best_run[-1]['move']}수까지 승률을 잃은 수가 없었습니다.", ply=best_run[0]["ply"]))
+    # 8. 불리할 때 버티기: 밀리는 자리(-1.5 이하)에서 둔 수의 80% 이상이 최선·좋음
+    behind = [p for p in mine if p["cp_before"] <= -150]
+    if len(behind) >= 6 and sum(1 for p in behind if ok(p)) * 100 >= len(behind) * 80:
+        k = sum(1 for p in behind if ok(p))
+        out.append(dict(key="defend", title=f"불리할 때 {len(behind)}수 중 {k}수 정확", text="밀리는 동안에도 흔들리지 않고 최선에 가까운 수를 뒀습니다.", ply=behind[0]["ply"]))
+    # 9. 대실수가 없는 판
+    if s.get("blunders") == 0 and len(mine) >= 15:
+        out.append(dict(key="noblunder", title="대실수 없는 판", text=f"내 {len(mine)}수 중 대실수 0개, 실수 {s.get('mistakes', 0)}개.", ply=None))
+    # 10. 시간 관리: 20수 이상 두면서 한 번도 30초 아래로 내려가지 않음
+    clocks = [p["clock"] for p in mine if p.get("clock") is not None]
+    if len(mine) >= 20 and clocks and min(clocks) >= 30:
+        out.append(dict(key="clock", title="시계가 30초 아래로 내려간 적 없음", text=f"종료 시 {clk_txt(s.get('my_final_clock'))} 남음 (상대 {clk_txt(s.get('opp_final_clock'))}).", ply=None))
+    if not out:      # 두드러진 것이 없어도 최선 수 비율은 보여 준다
+        nb = sum(1 for p in mine if p.get("is_best") or p.get("loss") == 0)
+        out.append(dict(key="best", title=f"최선 수 {nb}개 ({round(nb / len(mine) * 100)}%)", text="두드러지게 잘한 점은 없지만 최선 수의 비율입니다.", ply=None))
+    return out[:GOOD_MAX]
+
+
+def clk_txt(sec):
+    if sec is None:
+        return "-"
+    sec = int(round(sec))
+    return f"{sec // 60}:{sec % 60:02d}"
+
+
+def game_avg(games):
+    """잘한 점 비교용 평소 평균: 판별 정확도 평균과 국면별 정확도."""
+    mine = [p for g in games for p in g["plies"] if p["mine"]]
+    accs = [g["summary"].get("accuracy") for g in games if g["summary"].get("accuracy") is not None]
+    return dict(accuracy=round(sum(accs) / len(accs), 1) if accs else None,
+                phase={ph: acc([p["wp_loss"] for p in mine if p["phase"] == ph]) for ph in PHASE_LABEL})
 
 
 def _share(part, whole):
@@ -2146,9 +2251,11 @@ def export_game(con, g):
         board.push(mv)
         fens.append(board.fen())
     summary = json.loads(g["summary"]) if isinstance(g.get("summary"), str) else (g.get("summary") or {})
+    avg_s = meta_get(con, "avg")
+    good = highlights(plies, dict(summary, outcome=g["outcome"]), json.loads(avg_s) if avg_s else None)
     data = dict(id=game_id(g["url"]), url=g["url"], date=g["date"], white=g["white"], black=g["black"], welo=g["welo"], belo=g["belo"],
                 my_color=g["my_color"], result=g["result"], outcome=g["outcome"], termination=g["termination"],
-                eco_name=g["eco_name"], summary=summary, plies=out, fens=fens, lines=lines,
+                eco_name=g["eco_name"], summary=summary, plies=out, fens=fens, lines=lines, good=good,
                 depth=g.get("depth") or DEPTH, pv_depth=LINE_DEPTH)
     os.makedirs(os.path.join(DOCS, "games"), exist_ok=True)
     path = os.path.join(DOCS, "games", f"{data['id']}.json")
@@ -2156,13 +2263,15 @@ def export_game(con, g):
     return path
 
 
-GAME_EXPORT_V = "7"    # 게임 상세 JSON 의 형식 버전. 올리면 다음 실행에서 모든 게임을 다시 내보낸다 (2: 실수 유형 cat, 3: 교환 평가로 다시 분류, 4: 상대 수법을 여섯 유형으로, 5: 탁월한 수, 6: 대단한 수, 7: 대단한 수 규칙을 조용한 수로 좁힘)
+GAME_EXPORT_V = "8"    # 게임 상세 JSON 의 형식 버전. 올리면 다음 실행에서 모든 게임을 다시 내보낸다 (2: 실수 유형 cat, 3: 교환 평가로 다시 분류, 4: 상대 수법을 여섯 유형으로, 5: 탁월한 수, 6: 대단한 수, 7: 대단한 수 규칙을 조용한 수로 좁힘, 8: 잘한 점 good)
 
 
 def export_missing_games(con):
     """상세 JSON 이 없는 게임을 내보낸다. 형식 버전이 바뀌었으면 전부 다시."""
     n = 0
     redo = meta_get(con, "game_export_v") != GAME_EXPORT_V
+    if redo or meta_get(con, "avg") is None:        # 잘한 점의 '평소 평균' 비교가 첫 내보내기부터 붙도록
+        meta_set(con, "avg", json.dumps(game_avg(load_games(con))))
     for g in con.execute("SELECT * FROM games WHERE analyzed=1").fetchall():
         g = dict(g)
         if redo or not os.path.exists(os.path.join(DOCS, "games", f"{game_id(g['url'])}.json")):
@@ -2432,6 +2541,8 @@ def render_all(con, cfg):
     from render import write_pieces
     now = datetime.now(KST)
     games_all = load_games(con)
+    if games_all:
+        meta_set(con, "avg", json.dumps(game_avg(games_all)))     # 잘한 점의 '평소 평균' (게임 페이지·최근 게임 모두 전체 기간 기준)
     book = build_book(con, games_all)[0] if games_all else {}
     windows = {
         "all": compute_stats(games_all, con),

@@ -158,6 +158,8 @@ function focusRow(c,i){
     <div class="q">${esc(m.q)}</div>
     <div class="fline">${seqDots(c.recent)}<span>최근 ${c.recent.k}판 중 ${c.recent.games}판</span>${trendChip(c.trend)}</div></div></a>`;
 }
+/* 잘한 점 칩(초록 체크): 최근 게임 목록과 직전 판 카드. 누르면 그 장면으로 (장면이 없는 항목은 게임 페이지로) */
+const goodTags=(g,k,tag='a')=>{ const L=(g.good||[]).filter(x=>x.key!=='best').slice(0,k); return L.length?`<div class="ctags">${L.map(x=>`<${tag} class="ctag plus"${tag==='a'?` href="${gameLink(g.url,x.ply)}"`:''}>✓ ${esc(x.title)}</${tag}>`).join('')}</div>`:''; };
 function lastGameCard(S){
   const g=S.recent[0]; if(!g) return '';
   const focus=coachOf(S).focus, cats=g.cats||[], hit=focus.filter(k=>cats.some(c=>c[0]===k));
@@ -168,7 +170,7 @@ function lastGameCard(S){
   else if(hit.length) v=`집중 과제 ${focus.length}가지 중 <b>${hit.length}가지가 또 나왔습니다.</b>`;
   else v=`집중 과제 ${focus.length}가지는 이 판에 <b>하나도 안 나왔습니다.</b> 다른 유형의 실수만 있었습니다.`;
   return `<a class="card lastg" href="${gameLink(g.url)}"><div class="h"><div><div class="k">직전 판 피드백</div><b>${g.date.slice(5)} ${g.color==='w'?'백':'흑'} vs ${esc(g.opp)} · ${res}</b></div><span class="go">복기 ›</span></div>
-    <div class="v">${v}</div>${cats.length?`<div class="ctags">${cats.map(([k,n])=>catTag(k,focus.includes(k)?'rep':'').replace('</span>',`${n>1?` ×${n}`:''}</span>`)).join('')}</div>`:''}</a>`;
+    <div class="v">${v}</div>${cats.length?`<div class="ctags">${cats.map(([k,n])=>catTag(k,focus.includes(k)?'rep':'').replace('</span>',`${n>1?` ×${n}`:''}</span>`)).join('')}</div>`:''}${goodTags(g,2,'span')}</a>`;
 }
 /* 홈의 '오늘' 한 줄: 교본 1장 · 오늘의 퍼즐 · 오프닝 1라인. 완료 여부는 각 페이지가 기기에 남긴 기록에서 읽는다 */
 function routineLine(){
@@ -492,7 +494,7 @@ function render(){
   hw+='</section>';
   // 최근 게임
   const RECENT_N=6, FOCUS=coachOf(S).focus;
-  h+=`<section id="s-recent" data-view="games"><h2>최근 게임<small>태그는 그 판의 실수 유형 · 파란 테두리는 집중 과제</small></h2><div class="card">`;
+  h+=`<section id="s-recent" data-view="games"><h2>최근 게임<small>회색 태그는 실수 유형(파란 테두리는 집중 과제) · 초록 체크는 잘한 점</small></h2><div class="card">`;
   S.recent.forEach((g,gi)=>{
     if(gi===RECENT_N) h+=`<div class="fold" id="fold-recent" hidden>`;
     const how={checkmated:'메이트',resigned:'기권',timeout:'시간',abandoned:'포기',agreed:'합의',repetition:'반복',stalemate:'스테일',insufficient:'기물부족'};
@@ -504,6 +506,7 @@ function render(){
       <div class="s">정확도 ${g.accuracy}% · 대실수 ${g.blunders}${endby?` · ${endby}`:''} · 시계 ${clk(g.my_final_clock)}</div></div></a>
       ${spark(g.evals, worstPly)}
       ${g.cats&&g.cats.length?`<div class="ctags">${g.cats.map(([k,n])=>catTag(k,FOCUS.includes(k)?'rep':'').replace('</span>',`${n>1?` ×${n}`:''}</span>`)).join('')}</div>`:''}
+      ${goodTags(g,3)}
       ${w&&w.fen&&w.wp_loss>=10?`<div class="w" data-expand="${wid}" role="button">결정적 실수 <span class="mono">${mv(w)}</span> → <span class="mono">${esc(w.best)}</span> <span class="sub">${ev(w.cp_before)} → ${ev(w.cp_after)}</span><span class="tg">장면 보기</span></div>
       <div id="${wid}" hidden data-w='${esc(JSON.stringify({...w,color:g.color,opp:g.opp,date:g.date,url:g.url}))}'></div>`:''}
     </div>`;

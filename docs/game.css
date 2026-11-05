@@ -40,7 +40,8 @@ header{position:static;border-bottom:0;padding:calc(12px + env(safe-area-inset-t
 .legend i.dotk{width:9px;height:9px;border-radius:50%;background:var(--s1);box-shadow:0 0 0 2px var(--surface),0 0 0 3px var(--line2)}
 #cchart{cursor:pointer;margin-top:8px}
 /* 이 판의 교훈 */
-.lessons{max-width:470px;margin-left:auto;margin-right:auto}
+.lessons,.plus{max-width:470px;margin-left:auto;margin-right:auto}
+.plus .key b{color:var(--good);font-weight:600}.plus .key.nojump{cursor:default}.plus .ck{display:inline-block;font-style:normal;width:18px;height:18px;line-height:18px;text-align:center;border-radius:50%;background:color-mix(in srgb,var(--good) 18%,transparent);font-size:12px;margin-right:7px;vertical-align:1px}
 .lessons .lv{font-size:14.5px;color:var(--text2);margin-bottom:4px}.lessons .lv b{color:var(--text)}
 .lesson{padding:11px 0;border-top:1px solid var(--line)}
 .lesson:last-child{padding-bottom:0}

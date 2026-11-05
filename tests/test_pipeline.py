@@ -349,10 +349,36 @@ class WithDb(unittest.TestCase):
     def add_lines_not_ok(self):
         self.con.execute("DELETE FROM lines"); self.add_lines(puzzle_ok=False)
 
+    def test_highlights(self):
+        mk = lambda i, mine, loss, cp_b, cp_a, clock=300.0, phase="middlegame": dict(
+            ply=i, move=(i + 1) // 2, mover="w" if i % 2 else "b", mine=mine, san="Nf3", loss=loss, cp_before=cp_b, cp_after=cp_a,
+            wp_loss=round(max(0.0, pipeline.winpct(cp_b) - pipeline.winpct(cp_a)), 1), clock=clock, phase=phase, is_best=int(loss == 0))
+        plies = []
+        for i in range(1, 49):
+            mine = i % 2                                                        # 백 = 나
+            if mine:
+                plies.append(mk(i, 1, 0, 50, 60))                               # 내 수는 전부 최선
+            else:
+                loss = 300 if i in (10, 20) else 0                              # 상대는 두 번 대실수
+                plies.append(mk(i, 0, loss, -60, -60 - loss))
+        s = dict(accuracy=95.0, blunders=0, mistakes=0, my_final_clock=200.0, opp_final_clock=100.0, outcome="W")
+        keys = [h["key"] for h in pipeline.highlights(plies, s, dict(accuracy=86.0, phase=dict(middlegame=86.0)))]
+        self.assertEqual(keys, ["punish", "acc", "phase_middlegame", "streak", "noblunder", "clock"])   # 우선순위 순, 최대 GOOD_MAX 개
+        self.assertEqual(len(keys), pipeline.GOOD_MAX)
+        h = pipeline.highlights(plies, s, None)[0]
+        self.assertEqual((h["key"], h["title"], h["ply"]), ("punish", "상대 실수 2번을 모두 바로 살림", 11))
+        # 아무것도 두드러지지 않으면 최선 수 비율 하나만
+        few = [mk(1, 1, 120, 0, -120), mk(2, 0, 0, 120, 120), mk(3, 1, 0, -120, -120)]
+        h = pipeline.highlights(few, dict(accuracy=70.0, blunders=0, outcome="L"), None)
+        self.assertEqual([x["key"] for x in h], ["best"]); self.assertIn("1개 (50%)", h[0]["title"])
+        self.assertEqual(pipeline.highlights([], {}, None), [])
+
     def test_game_export_and_coach_file(self):
         self.assertEqual(pipeline.export_missing_games(self.con), 24)
         g = json.load(open(os.path.join(pipeline.DOCS, "games", "1000.json")))
         self.assertEqual([p.get("cat") for p in g["plies"]], ["allowed_deep", None])         # 내 수(백)의 400 손해만 유형이 붙는다
+        self.assertEqual([x["key"] for x in g["good"]], ["best"])                                # 2수짜리 판: 잘한 점은 최선 수 비율만
+        self.assertIsNotNone(pipeline.meta_get(self.con, "avg"))                              # 평소 평균이 첫 내보내기 전에 저장된다
         self.assertEqual(pipeline.export_missing_games(self.con), 0)                  # 형식 버전이 같으면 다시 내보내지 않는다
         pipeline.meta_set(self.con, "game_export_v", "old")
         self.assertEqual(pipeline.export_missing_games(self.con), 24)
