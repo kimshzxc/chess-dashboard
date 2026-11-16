@@ -250,7 +250,7 @@ def run(c, base, server, shots):
     check("히어로 레이팅 숫자", str(S["overview"]["rating"]) in (c.ev("document.querySelector('.herocard .big')?.textContent") or ""))
     tier = S["overview"].get("tier") or {}
     check("히어로 티어 엠블럼과 상위 비율", c.ev("!!document.querySelector('.tierrow svg.tier-badge')") and tier.get("label", "") in (c.ev("document.querySelector('.tierrow')?.textContent") or "")
-          and f"상위 {tier.get('top', 0):g}%" in (c.ev("document.querySelector('.tierrow')?.textContent") or "") and c.ev("document.querySelector('.tierrow svg').classList.contains('" + tier.get("tier", "") + "')"), tier.get("label"))
+          and f"상위 {'' if (tier.get('anchor') or {}).get('exact') else '약 '}{tier.get('top', 0):g}%" in (c.ev("document.querySelector('.tierrow')?.textContent") or "") and c.ev("document.querySelector('.tierrow svg').classList.contains('" + tier.get("tier", "") + "')"), tier.get("label"))
     nd = c.ev("document.querySelectorAll('#rchart circle:not(.xc-d)').length"); ns = len(S["rating_series"])
     check("레이팅 그래프: 판이 많으면 점 대신 선", nd == (ns if ns <= 150 else 0) and ("판마다의 레이팅" in c.ev("document.querySelector('.herocard .lg').textContent") if ns > 150 else True), (nd, ns))
     # 기록 내보내기·가져오기 (테마 패널의 '기록'): 내보낸 기록을 지운 뒤 가져오면 돌아오고, 양쪽 기록은 합쳐진다

@@ -12,7 +12,7 @@
   python pipeline.py --render-only    새 게임 수집/분석 없이 통계만 다시 생성
   python pipeline.py --weekly-dry     주간 요약 문장을 출력만 한다
 """
-import argparse, base64, fcntl, io, json, math, os, re, sqlite3, sys, time, platform
+import argparse, base64, fcntl, html, io, json, math, os, re, shutil, sqlite3, subprocess, sys, time, platform
 import urllib.request, urllib.error
 from collections import Counter, defaultdict
 from datetime import datetime, timezone, timedelta
@@ -46,8 +46,12 @@ GREAT_HIDDEN = 150     # 대단한 수: 둔 뒤 평가가 기물 수보다 이�
 # Are at Each Rating?" (2026-08). 공개 API 에는 백분위가 없어 이 표를 선형 보간한다. 활동 중인 계정만 세면 백분위는 이보다 낮다.
 RATING_PCT = [(100, 3), (400, 25), (600, 47), (800, 65), (1000, 80), (1200, 90), (1400, 95), (1600, 97.5), (1800, 99), (2000, 99.5), (2400, 99.95), (3000, 99.999)]
 # 보정점: 체스닷컴 전적 페이지(내 프로필 > 통계 > 래피드)에 실제로 표시된 백분위. 표가 이 점을 지나도록 로짓 공간에서 평행 이동한다.
-# 체스닷컴은 최근에 둔 계정만 세는 듯 표보다 높게 나온다. 값이 많이 달라지면 (레이팅, 백분위, 날짜) 를 갱신하면 된다.
+# 체스닷컴은 최근에 둔 계정만 세는 듯 표보다 높게 나온다. 파이프라인이 그 페이지를 headless Chrome 으로 읽어 meta pct_anchor 에 최신 값을
+# 두고(refresh_percentile), 이 상수는 읽기에 한 번도 성공하지 못했을 때의 기본값이다.
 PCT_ANCHOR = (1042, 88.0, "2026-11-16")
+PCT_URL = "https://www.chess.com/member/{me}/stats/rapid?days=90"   # 로그인 없이 보이는 공개 전적 페이지. 백분위는 JS 가 그린다
+PCT_MAX_AGE = 24 * 3600   # 레이팅이 그대로여도 이 시간이 지나면 다시 읽는다 (분포 자체가 움직인다)
+PCT_RETRY = 3600          # 읽기에 실패했으면 이 시간 뒤에 다시 시도
 # 롤(리그 오브 레전드) 솔로 랭크 티어 비율로 환산: (키, 이름, 그 티어까지의 누적 비율 %). 2025년 분포(아이언 5, 브론즈 15, 실버 22, 골드 24, 플래 17, 에메 10, 다이아 5, 마스터 1.2, 그마 0.6, 챌 0.2)
 TIERS = [("iron", "아이언", 5), ("bronze", "브론즈", 20), ("silver", "실버", 42), ("gold", "골드", 66), ("platinum", "플래티넘", 83), ("emerald", "에메랄드", 93),
          ("diamond", "다이아몬드", 98), ("master", "마스터", 99.2), ("grandmaster", "그랜드마스터", 99.8), ("challenger", "챌린저", 100)]
@@ -1145,7 +1149,7 @@ def compute_stats(games, con=None):
         blunders_pg=round(sum(1 for p in mine if p["loss"] >= 300) / n, 2),
         opp_blunders_pg=round(sum(1 for p in opp if p["loss"] >= 300) / n, 2),
         rating=games[-1]["my_elo"], rating_best=max(g["my_elo"] for g in games), rating_start=games[0]["my_elo"],
-        first_date=games[0]["date"], last_date=games[-1]["date"], tier=tier_info(games[-1]["my_elo"]),
+        first_date=games[0]["date"], last_date=games[-1]["date"], tier=tier_info(games[-1]["my_elo"], anchor_get(con)),
     )
     for c in "wb":
         gs = [g for g in games if g["my_color"] == c]
@@ -1515,33 +1519,111 @@ def _ilogit(x):
     return 100 / (1 + math.exp(-x))
 
 
-def _pct_shift():
-    """보정점(PCT_ANCHOR)을 지나도록 하는 로짓 이동량."""
-    return _logit(PCT_ANCHOR[1]) - _logit(_table_pct(PCT_ANCHOR[0])) if PCT_ANCHOR else 0.0
+def default_anchor():
+    return dict(rating=PCT_ANCHOR[0], below=PCT_ANCHOR[1], date=PCT_ANCHOR[2], source="default") if PCT_ANCHOR else None
 
 
-def rating_percentile(rating):
+def anchor_get(con):
+    """meta 에 저장된 최신 보정점(체스닷컴 전적 페이지에서 읽은 값). 없으면 기본 상수."""
+    if con is not None:
+        raw = meta_get(con, "pct_anchor")
+        if raw:
+            try:
+                a = json.loads(raw)
+                if a.get("rating") and a.get("below") is not None:
+                    return a
+            except ValueError:
+                pass
+    return default_anchor()
+
+
+def _pct_shift(anchor=None):
+    """보정점을 지나도록 하는 로짓 이동량."""
+    a = anchor or default_anchor()
+    return _logit(a["below"]) - _logit(_table_pct(a["rating"])) if a else 0.0
+
+
+def rating_percentile(rating, anchor=None):
     """레이팅 → 체스닷컴 래피드에서 그 아래 비율(%). 표를 보정점에 맞춰 로짓 공간에서 이동한 값."""
-    return _ilogit(_logit(_table_pct(rating)) + _pct_shift())
+    return _ilogit(_logit(_table_pct(rating)) + _pct_shift(anchor))
 
 
-def percentile_rating(below):
+def percentile_rating(below, anchor=None):
     """rating_percentile 의 역함수: 그 아래 비율(%) → 레이팅."""
-    return _table_rating(_ilogit(_logit(below) - _pct_shift()))
+    return _table_rating(_ilogit(_logit(below) - _pct_shift(anchor)))
 
 
-def tier_info(rating):
-    """레이팅 → 상위 비율과 롤식 티어. {below, top, tier, name, div, label, next_name, next_rating}.
-    div 는 티어 안 4단계(IV→I, 마스터 이상은 없음). next_rating 은 다음 티어에 드는 레이팅(추정)."""
-    below = rating_percentile(rating)
+def parse_percentile(page):
+    """체스닷컴 전적 페이지(렌더링된 HTML 또는 그 글자)에서 백분위(%)와 표시된 래피드 레이팅을 뽑는다. 없으면 (None, None)."""
+    t = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", page, flags=re.S | re.I)
+    t = html.unescape(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", t)))
+    m = re.search(r"Percentile\s*([0-9]+(?:\.[0-9]+)?)\s*%", t)
+    r = re.search(r"Overview Rapid (\d{3,4})\b", t)
+    return (float(m.group(1)) if m else None, int(r.group(1)) if r else None)
+
+
+def chrome_bin():
+    for c in [os.environ.get("CHROME_BIN"), "google-chrome", "google-chrome-stable", "chromium", "chromium-browser"]:
+        if c and shutil.which(c):
+            return shutil.which(c)
+    return None
+
+
+def fetch_percentile(me, timeout=120):
+    """체스닷컴 공개 전적 페이지를 headless Chrome 으로 그려 백분위를 읽는다. 공개 API 에는 없는 값이다.
+    돌려주는 것: (백분위 %, 페이지의 레이팅) 또는 실패 시 (None, None)."""
+    chrome = chrome_bin()
+    if not chrome:
+        raise RuntimeError("Chrome 이 없습니다")
+    prof = os.path.join(DATA, "chrome-profile")
+    cmd = [chrome, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--no-first-run", "--disable-extensions",
+           "--user-data-dir=" + prof, "--timeout=30000", "--dump-dom", PCT_URL.format(me=me)]
+    try:
+        out = subprocess.run(cmd, capture_output=True, timeout=timeout).stdout.decode("utf-8", "replace")
+    finally:
+        shutil.rmtree(prof, ignore_errors=True)
+    return parse_percentile(out)
+
+
+def refresh_percentile(con, cfg, rating, now=None):
+    """보정점이 낡았거나(PCT_MAX_AGE) 레이팅이 바뀌었으면 체스닷컴 전적 페이지에서 백분위를 다시 읽어 meta pct_anchor 에 둔다.
+    값이 바뀌었을 때만 True. 실패하면 PCT_RETRY 뒤에 다시 시도한다."""
+    now = now or time.time()
+    cur = anchor_get(con)
+    if cur.get("source") == "chess.com" and cur.get("rating") == rating and now - cur.get("ts", 0) < PCT_MAX_AGE:
+        return False
+    tried = meta_get(con, "pct_tried")
+    if tried and float(tried) > 0 and now - float(tried) < PCT_RETRY:
+        return False
+    meta_set(con, "pct_tried", str(now))   # 실패하면(예외) 남아서 PCT_RETRY 동안 다시 시도하지 않는다
+    me = cfg["CHESSCOM_USERNAME"].lower()
+    below, shown = fetch_percentile(me)
+    if below is None:
+        raise RuntimeError("전적 페이지에 백분위가 없습니다")
+    meta_set(con, "pct_tried", "0")
+    new = dict(rating=shown or rating, below=below, date=datetime.fromtimestamp(now, KST).strftime("%Y-%m-%d"), ts=int(now), source="chess.com")
+    changed = (new["rating"], new["below"]) != (cur.get("rating"), cur.get("below")) or cur.get("source") != "chess.com"
+    meta_set(con, "pct_anchor", json.dumps(new, ensure_ascii=False))
+    if changed:
+        log(f"체스닷컴 백분위 갱신: {new['rating']}점 → 상위 {100 - below:g}%")
+    return changed
+
+
+def tier_info(rating, anchor=None):
+    """레이팅 → 상위 비율과 롤식 티어. {below, top, tier, name, div, label, next_name, next_rating, anchor}.
+    div 는 티어 안 4단계(IV→I, 마스터 이상은 없음). next_rating 은 다음 티어에 드는 레이팅(추정).
+    anchor 는 체스닷컴 전적 페이지에서 읽은 보정점(anchor_get). 그 레이팅과 같으면 exact=True 로 체스닷컴 값 그대로다."""
+    anchor = anchor or default_anchor()
+    below = rating_percentile(rating, anchor)
     lo = 0.0
     for i, (key, name, hi) in enumerate(TIERS):
         if below < hi or i == len(TIERS) - 1:
             div = None if hi > 99 else ["IV", "III", "II", "I"][min(3, int((below - lo) / (hi - lo) * 4))]
             nxt = TIERS[i + 1] if i + 1 < len(TIERS) else None
+            an = dict(rating=anchor["rating"], below=anchor["below"], date=anchor["date"], source=anchor.get("source", "default"),
+                      exact=anchor["rating"] == rating and anchor.get("source") == "chess.com") if anchor else None
             return dict(below=round(below, 1), top=round(100 - below, 1), tier=key, name=name, div=div, label=name + (f" {div}" if div else ""),
-                        next_name=nxt[1] if nxt else None, next_rating=int(round(percentile_rating(hi) / 5.0) * 5) if nxt else None,
-                        anchor=dict(rating=PCT_ANCHOR[0], below=PCT_ANCHOR[1], date=PCT_ANCHOR[2]) if PCT_ANCHOR else None)
+                        next_name=nxt[1] if nxt else None, next_rating=int(round(percentile_rating(hi, anchor) / 5.0) * 5) if nxt else None, anchor=an)
         lo = hi
 
 
@@ -2741,6 +2823,14 @@ def main():
         except Exception as e:
             log(f"친선 대국 정리 실패: {e}")
         new_done = analyze_pending(con, cfg)
+    # 체스닷컴 전적 페이지의 실제 백분위 (하루 한 번, 또는 레이팅이 바뀌었을 때)
+    pct_n = 0
+    if not a.render_only:
+        try:
+            cur = con.execute("SELECT my_elo FROM games WHERE analyzed=1 ORDER BY end_time DESC LIMIT 1").fetchone()
+            pct_n = int(refresh_percentile(con, cfg, cur[0])) if cur else 0
+        except Exception as e:
+            log(f"체스닷컴 백분위 읽기 실패: {e}")
     brill_n = retag_brilliant(con)   # 판정 규칙이 바뀌었을 때만 전체 다시 판정 (엔진 없이 몇 초)
     # 실수 국면의 수순·복수 정답. 밀린 것이 있으면 한 번에 LINES_BATCH 개씩, 최근 게임부터.
     lines_n, lines_urls = 0, set()
@@ -2772,7 +2862,7 @@ def main():
     pending_notify = [dict(r) for r in con.execute("SELECT * FROM games WHERE analyzed=1 AND notified=0")]
     if code_changed:
         log("코드가 바뀌어 통계를 다시 만듭니다")
-    rendered = bool(new_done or lines_n or book_n or moves_n or purged or brill_n or a.render_only or code_changed or not os.path.exists(index))
+    rendered = bool(new_done or lines_n or book_n or moves_n or purged or brill_n or pct_n or a.render_only or code_changed or not os.path.exists(index))
     if rendered:
         # 수순이 새로 계산된 게임의 상세 JSON 은 다시 내보낸다
         for url in set(new_done) | lines_urls:

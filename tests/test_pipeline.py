@@ -384,6 +384,34 @@ class WithDb(unittest.TestCase):
         self.assertEqual(pipeline.tier_info(50)["tier"], "iron")
         for r in range(100, 2500, 50):                                                  # 레이팅이 오르면 백분위와 티어도 내려가지 않는다
             self.assertLessEqual(pipeline.rating_percentile(r), pipeline.rating_percentile(r + 50))
+        self.assertEqual(pipeline.parse_percentile("<html><style>a{b:1%}</style><div>Overview</div> <span>Rapid</span> <b>1050</b> 213 "
+                                                   "<span>Percentile</span>&nbsp;<em>88.8%</em>"), (88.8, 1050))
+        self.assertEqual(pipeline.parse_percentile("<p>no stats</p>"), (None, None))
+        # 전적 페이지에서 읽은 보정점: 그 레이팅에서는 체스닷컴 값 그대로(exact), 다른 레이팅에서는 그 점을 지나는 추정
+        an = dict(rating=1050, below=88.8, date="2026-11-16", ts=1, source="chess.com")
+        ex = pipeline.tier_info(1050, an)
+        self.assertEqual((ex["below"], ex["anchor"]["exact"], ex["anchor"]["source"]), (88.8, True, "chess.com"))
+        self.assertFalse(pipeline.tier_info(1042, an)["anchor"]["exact"])
+        self.assertFalse(pipeline.tier_info(1042)["anchor"]["exact"])                     # 기본 상수는 추정으로 표시
+        # refresh_percentile: 처음엔 읽고 저장, 같은 레이팅에 하루 안이면 다시 읽지 않고, 실패하면 PCT_RETRY 동안 쉰다
+        calls = []
+        orig = pipeline.fetch_percentile
+        pipeline.fetch_percentile = lambda me: (calls.append(me), (88.8, 1050))[1]
+        try:
+            self.assertTrue(pipeline.refresh_percentile(self.con, {"CHESSCOM_USERNAME": "Me"}, 1050, now=1000))
+            self.assertEqual(calls, ["me"])
+            self.assertEqual(pipeline.anchor_get(self.con)["below"], 88.8)
+            self.assertFalse(pipeline.refresh_percentile(self.con, {"CHESSCOM_USERNAME": "Me"}, 1050, now=2000))
+            self.assertEqual(len(calls), 1)
+            pipeline.fetch_percentile = lambda me: (None, None)
+            with self.assertRaises(RuntimeError):
+                pipeline.refresh_percentile(self.con, {"CHESSCOM_USERNAME": "Me"}, 1060, now=3000)        # 레이팅이 바뀌어 다시 읽는다
+            pipeline.fetch_percentile = lambda me: (89.0, 1060)
+            self.assertFalse(pipeline.refresh_percentile(self.con, {"CHESSCOM_USERNAME": "Me"}, 1060, now=3100))   # 실패 뒤 1시간은 쉰다
+            self.assertTrue(pipeline.refresh_percentile(self.con, {"CHESSCOM_USERNAME": "Me"}, 1060, now=3000 + pipeline.PCT_RETRY))
+            self.assertEqual(pipeline.anchor_get(self.con)["rating"], 1060)
+        finally:
+            pipeline.fetch_percentile = orig
         rows = pipeline.strength_stats([{"punish", "clock"}, {"punish"}, set(), {"clock", "mate"}], k=2)
         self.assertEqual([(r["key"], r["games"], r["share"], r["recent"]["games"]) for r in rows],
                          [("punish", 2, 50.0, 0), ("clock", 2, 50.0, 1), ("mate", 1, 25.0, 1)])
