@@ -227,11 +227,12 @@ h2 small{max-width:46ch}
 .routine a{font-size:12.5px;gap:5px;padding:0 4px}
 .routine a i{width:13px;height:13px;font-size:9px;line-height:11px}
 
-/* 티어 줄 (히어로) */
-.tierrow{display:flex;align-items:center;gap:12px;margin:2px 0 10px;padding:10px 12px;border-radius:14px;background:color-mix(in srgb,var(--surface2) 70%,transparent);border:1px solid var(--line)}
-.tierrow .tb{flex:none;display:flex;filter:drop-shadow(0 2px 4px rgba(0,0,0,.3))}
-.tierrow .tt{min-width:0;line-height:1.35}.tierrow .tt>b{font-size:18px;letter-spacing:-.01em}
-.tierrow .sub{font-size:12.5px}.tierrow .sub.dim{color:var(--muted);font-size:11.5px}
+/* 티어 줄 (히어로): 작게 한 줄, 엠블럼은 글자 크기 */
+.tierrow{display:flex;flex-wrap:wrap;align-items:center;gap:0 6px;margin:-4px 0 8px;font-size:12.5px;color:var(--text2)}
+.tierrow>b{color:var(--text)}
+.tierrow .tb{display:inline-flex;align-items:center;gap:4px;padding:1px 7px 1px 3px;border-radius:999px;background:var(--surface2);border:1px solid var(--line)}
+.tierrow .tb b{color:var(--text);font-size:12px}.tierrow .tb svg{display:block}
+.tierrow .dim{color:var(--muted)}
 /* 집중 과제 아래 수 구간별 대실수율 */
 .bym{display:block;position:relative;padding-right:84px;color:var(--text);text-decoration:none}
 .bym .go{position:absolute;right:16px;top:50%;transform:translateY(-50%);font-size:13px;color:var(--me);font-weight:600}

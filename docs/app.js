@@ -164,7 +164,7 @@ function tierRow(o){
   const gap=t.next_rating!=null?t.next_rating-o.rating:null;
   const nxt=t.next_name?(gap>0?`${t.next_name}까지 +${gap}점`:`${t.next_name} 눈앞`):'최고 티어';
   const an=t.anchor?`체스닷컴 전적의 백분위(${t.anchor.rating}점 ${t.anchor.below}%, ${t.anchor.date.slice(5)})에 맞춰 보정`:'전체 계정 분포 기준 추정';
-  return `<div class="tierrow" title="체스닷컴 래피드 분포(추정)를 ${an}한 뒤, 롤 솔로 랭크 티어 비율에 맞춰 환산한 것입니다."><span class="tb">${tierBadge(t.tier,56)}</span><div class="tt"><b>${esc(t.label)}</b><div class="sub">체스닷컴 래피드 상위 <b>${t.top}%</b> · ${nxt}</div><div class="sub dim">${an} · 롤 티어 비율로 환산</div></div></div>`;
+  return `<div class="tierrow" title="체스닷컴 래피드 분포(추정)를 ${an}한 뒤, 롤 솔로 랭크 티어 비율에 맞춰 환산한 것입니다.">체스닷컴 래피드 상위 <b>${t.top}%</b><span class="tb">${tierBadge(t.tier,18)}<b>${esc(t.label)}</b></span><span class="dim">· ${nxt}</span></div>`;
 }
 /* 오늘·지금 세션의 판 수: 30분 이상 비면 새 세션 (파이프라인 SESSION_GAP 과 같다) */
 const SESSION_GAP=1800;
