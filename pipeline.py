@@ -45,6 +45,9 @@ GREAT_HIDDEN = 150     # 대단한 수: 둔 뒤 평가가 기물 수보다 이�
 # 체스닷컴 래피드 레이팅 분포(전체 계정 기준 추정): (레이팅, 그 아래 비율 %). 출처: chess.com 블로그 "What Percentage of Chess.com Players
 # Are at Each Rating?" (2026-08). 공개 API 에는 백분위가 없어 이 표를 선형 보간한다. 활동 중인 계정만 세면 백분위는 이보다 낮다.
 RATING_PCT = [(100, 3), (400, 25), (600, 47), (800, 65), (1000, 80), (1200, 90), (1400, 95), (1600, 97.5), (1800, 99), (2000, 99.5), (2400, 99.95), (3000, 99.999)]
+# 보정점: 체스닷컴 전적 페이지(내 프로필 > 통계 > 래피드)에 실제로 표시된 백분위. 표가 이 점을 지나도록 로짓 공간에서 평행 이동한다.
+# 체스닷컴은 최근에 둔 계정만 세는 듯 표보다 높게 나온다. 값이 많이 달라지면 (레이팅, 백분위, 날짜) 를 갱신하면 된다.
+PCT_ANCHOR = (1042, 88.0, "2026-11-16")
 # 롤(리그 오브 레전드) 솔로 랭크 티어 비율로 환산: (키, 이름, 그 티어까지의 누적 비율 %). 2025년 분포(아이언 5, 브론즈 15, 실버 22, 골드 24, 플래 17, 에메 10, 다이아 5, 마스터 1.2, 그마 0.6, 챌 0.2)
 TIERS = [("iron", "아이언", 5), ("bronze", "브론즈", 20), ("silver", "실버", 42), ("gold", "골드", 66), ("platinum", "플래티넘", 83), ("emerald", "에메랄드", 93),
          ("diamond", "다이아몬드", 98), ("master", "마스터", 99.2), ("grandmaster", "그랜드마스터", 99.8), ("challenger", "챌린저", 100)]
@@ -1484,24 +1487,47 @@ def clk_txt(sec):
     return f"{sec // 60}:{sec % 60:02d}"
 
 
-def rating_percentile(rating):
-    """레이팅 → 체스닷컴 래피드 전체에서 그 아래 비율(%) (RATING_PCT 선형 보간)."""
+def _table_pct(rating):
+    """RATING_PCT 선형 보간: 레이팅 → 그 아래 비율(%) (보정 전)."""
     pts = RATING_PCT
     if rating <= pts[0][0]:
-        return pts[0][1] * rating / pts[0][0]
+        return max(0.01, pts[0][1] * rating / pts[0][0])
     for (r0, p0), (r1, p1) in zip(pts, pts[1:]):
         if rating <= r1:
             return p0 + (p1 - p0) * (rating - r0) / (r1 - r0)
     return pts[-1][1]
 
 
-def percentile_rating(below):
-    """rating_percentile 의 역함수: 그 아래 비율(%) → 레이팅."""
+def _table_rating(below):
     pts = RATING_PCT
     for (r0, p0), (r1, p1) in zip(pts, pts[1:]):
         if below <= p1:
             return r0 + (r1 - r0) * (below - p0) / (p1 - p0)
     return pts[-1][0]
+
+
+def _logit(p):
+    p = min(99.99, max(0.01, p)) / 100
+    return math.log(p / (1 - p))
+
+
+def _ilogit(x):
+    return 100 / (1 + math.exp(-x))
+
+
+def _pct_shift():
+    """보정점(PCT_ANCHOR)을 지나도록 하는 로짓 이동량."""
+    return _logit(PCT_ANCHOR[1]) - _logit(_table_pct(PCT_ANCHOR[0])) if PCT_ANCHOR else 0.0
+
+
+def rating_percentile(rating):
+    """레이팅 → 체스닷컴 래피드에서 그 아래 비율(%). 표를 보정점에 맞춰 로짓 공간에서 이동한 값."""
+    return _ilogit(_logit(_table_pct(rating)) + _pct_shift())
+
+
+def percentile_rating(below):
+    """rating_percentile 의 역함수: 그 아래 비율(%) → 레이팅."""
+    return _table_rating(_ilogit(_logit(below) - _pct_shift()))
 
 
 def tier_info(rating):
@@ -1514,7 +1540,8 @@ def tier_info(rating):
             div = None if hi > 99 else ["IV", "III", "II", "I"][min(3, int((below - lo) / (hi - lo) * 4))]
             nxt = TIERS[i + 1] if i + 1 < len(TIERS) else None
             return dict(below=round(below, 1), top=round(100 - below, 1), tier=key, name=name, div=div, label=name + (f" {div}" if div else ""),
-                        next_name=nxt[1] if nxt else None, next_rating=int(round(percentile_rating(hi) / 5.0) * 5) if nxt else None)
+                        next_name=nxt[1] if nxt else None, next_rating=int(round(percentile_rating(hi) / 5.0) * 5) if nxt else None,
+                        anchor=dict(rating=PCT_ANCHOR[0], below=PCT_ANCHOR[1], date=PCT_ANCHOR[2]) if PCT_ANCHOR else None)
         lo = hi
 
 

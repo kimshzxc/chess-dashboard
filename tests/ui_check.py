@@ -389,7 +389,10 @@ def run(c, base, server, shots):
                 gsum = {}
                 for x in co["cats"]:
                     gsum[grp[x["key"]]] = gsum.get(grp[x["key"]], 0) + x["share"]
-                want = [x["key"] for x in sorted(co["cats"], key=lambda x: (-gsum[grp[x["key"]]], -x["share"]))]
+                first = {}
+                for i, x in enumerate(co["cats"]):
+                    first.setdefault(grp[x["key"]], i)        # 묶음 비중이 같으면(실제로 있었다: 21.5 = 21.5) 먼저 나온 묶음이 앞 (JS 의 안정 정렬과 같게)
+                want = [x["key"] for x in sorted(co["cats"], key=lambda x: (-round(gsum[grp[x["key"]]], 6), first[grp[x["key"]]], -x["share"]))]
                 check("유형 카드가 묶음별로, 묶음과 유형은 비중 순서로 나온다", c.ev("[...document.querySelectorAll('#s-cats .cat')].map(e=>e.id.slice(4))") == want
                       and c.ev("document.querySelectorAll('#s-cats .cgroup').length") == len(gsum))
                 snap("cats")

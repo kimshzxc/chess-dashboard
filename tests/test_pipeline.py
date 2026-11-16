@@ -374,10 +374,12 @@ class WithDb(unittest.TestCase):
         self.assertEqual(pipeline.highlights([], {}, None), [])
 
     def test_tier_and_strengths(self):
-        t = pipeline.tier_info(1042)
-        self.assertEqual((t["tier"], t["div"], t["label"], t["next_name"]), ("platinum", "I", "플래티넘 I", "에메랄드"))
+        t = pipeline.tier_info(pipeline.PCT_ANCHOR[0])
+        self.assertAlmostEqual(t["below"], pipeline.PCT_ANCHOR[1], places=1)                    # 보정점에서는 체스닷컴이 보여 준 값 그대로
+        self.assertEqual((t["tier"], t["div"], t["label"], t["next_name"]), ("emerald", "II", "에메랄드 II", "다이아몬드"))
         self.assertAlmostEqual(t["below"] + t["top"], 100.0, places=1)
-        self.assertGreater(t["next_rating"], 1042)
+        self.assertGreater(t["next_rating"], pipeline.PCT_ANCHOR[0])
+        self.assertAlmostEqual(pipeline.rating_percentile(pipeline.percentile_rating(93)), 93, places=3)   # 역함수
         self.assertEqual(pipeline.tier_info(2300)["tier"], "challenger"); self.assertIsNone(pipeline.tier_info(2300)["div"])
         self.assertEqual(pipeline.tier_info(50)["tier"], "iron")
         for r in range(100, 2500, 50):                                                  # 레이팅이 오르면 백분위와 티어도 내려가지 않는다
