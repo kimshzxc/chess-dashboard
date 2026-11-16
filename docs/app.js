@@ -158,8 +158,33 @@ function focusRow(c,i){
     <div class="q">${esc(m.q)}</div>
     <div class="fline">${seqDots(c.recent)}<span>최근 ${c.recent.k}판 중 ${c.recent.games}판</span>${trendChip(c.trend)}</div></div></a>`;
 }
+/* 티어 줄: 체스닷컴 래피드 전체에서의 상위 비율(추정)과 롤식 티어. 기준은 파이프라인 RATING_PCT/TIERS (README "분석 기준") */
+function tierRow(o){
+  const t=o.tier; if(!t) return '';
+  const gap=t.next_rating!=null?t.next_rating-o.rating:null;
+  const nxt=t.next_name?(gap>0?`${t.next_name}까지 +${gap}점`:`${t.next_name} 눈앞`):'최고 티어';
+  return `<div class="tierrow" title="체스닷컴 래피드 전체 계정 분포(2026-08 추정)에서의 위치를 롤 솔로 랭크 티어 비율에 맞춰 환산한 것입니다. 활동 중인 계정만 세면 이보다 낮습니다."><span class="tb">${tierBadge(t.tier,56)}</span><div class="tt"><b>${esc(t.label)}</b><div class="sub">체스닷컴 래피드 상위 <b>${t.top}%</b> · ${nxt}</div><div class="sub dim">전체 계정 분포 기준 추정 · 롤 티어 비율로 환산</div></div></div>`;
+}
+/* 오늘·지금 세션의 판 수: 30분 이상 비면 새 세션 (파이프라인 SESSION_GAP 과 같다) */
+const SESSION_GAP=1800;
+function sessionLine(S){
+  const log=S.log||[]; if(!log.length) return '';
+  const now=Date.now()/1000, last=log[log.length-1];
+  let n=1; for(let i=log.length-1;i>0&&log[i].t-log[i-1].t<=SESSION_GAP;i--) n++;
+  const today=new Date(Date.now()+9*3600*1000).toISOString().slice(0,10), nt=log.filter(g=>g.d===today).length;
+  const live=now-last.t<=SESSION_GAP;
+  const sp=((S.tilt||{}).session_pos||[]).find(r=>r.label==='6판째 이후');
+  const warn=live&&n>=5?`<span class="chip serious">${sp&&sp.score!=null?`6판째부터 승률 ${sp.score}%`:'쉬어 갈 때'}</span>`:'';
+  return `<div class="sess">${live?`지금 세션 <b>${n}판째</b>`:`마지막 세션 ${n}판`} · 오늘 ${nt}판 ${warn}</div>`;
+}
 /* 잘한 점 칩(초록 체크): 최근 게임 목록과 직전 판 카드. 누르면 그 장면으로 (장면이 없는 항목은 게임 페이지로) */
 const goodTags=(g,k,tag='a')=>{ const L=(g.good||[]).filter(x=>x.key!=='best').slice(0,k); return L.length?`<div class="ctags">${L.map(x=>`<${tag} class="ctag plus"${tag==='a'?` href="${gameLink(g.url,x.ply)}"`:''}>✓ ${esc(x.title)}</${tag}>`).join('')}</div>`:''; };
+/* 내 강점: 판마다 고른 잘한 점(highlights)이 전체 기간에 얼마나 자주 나왔는지 */
+function strengthSection(S){
+  const rows=S.strengths||[]; if(!rows.length) return '';
+  const n=S.overview.games, k=rows[0].recent.k;
+  return `<section id="s-strong" data-view="stats" data-sub="weak"><h2>내 강점<small>판마다 고른 잘한 점이 ${n}판 중 몇 판에 나왔는지 · 최근 ${k}판</small></h2><div class="card"><table><tr><th>잘한 점</th><th class="n">판</th><th class="n">비율</th><th class="n">최근 ${k}판</th></tr>${rows.map(r=>`<tr><td>${esc(r.label)}</td><td class="n">${r.games}</td><td class="n"><div class="sbar"><i style="width:${Math.min(100,r.share)}%"></i></div>${r.share}%</td><td class="n ${r.recent.games*k>=r.games/n*k*1.3&&r.recent.games>=3?'up':''}">${r.recent.games}</td></tr>`).join('')}</table><div class="sub" style="margin-top:8px">기준은 게임 페이지의 "이 판에서 잘한 것"과 같습니다. 최근 ${k}판 수가 초록이면 평소 비율보다 자주 나온 것입니다.</div></div></section>`;
+}
 function lastGameCard(S){
   const g=S.recent[0]; if(!g) return '';
   const focus=coachOf(S).focus, cats=g.cats||[], hit=focus.filter(k=>cats.some(c=>c[0]===k));
@@ -170,16 +195,18 @@ function lastGameCard(S){
   else if(hit.length) v=`집중 과제 ${focus.length}가지 중 <b>${hit.length}가지가 또 나왔습니다.</b>`;
   else v=`집중 과제 ${focus.length}가지는 이 판에 <b>하나도 안 나왔습니다.</b> 다른 유형의 실수만 있었습니다.`;
   return `<a class="card lastg" href="${gameLink(g.url)}"><div class="h"><div><div class="k">직전 판 피드백</div><b>${g.date.slice(5)} ${g.color==='w'?'백':'흑'} vs ${esc(g.opp)} · ${res}</b></div><span class="go">복기 ›</span></div>
-    <div class="v">${v}</div>${cats.length?`<div class="ctags">${cats.map(([k,n])=>catTag(k,focus.includes(k)?'rep':'').replace('</span>',`${n>1?` ×${n}`:''}</span>`)).join('')}</div>`:''}${goodTags(g,2,'span')}</a>`;
+    ${sessionLine(S)}<div class="v">${v}</div>${cats.length?`<div class="ctags">${cats.map(([k,n])=>catTag(k,focus.includes(k)?'rep':'').replace('</span>',`${n>1?` ×${n}`:''}</span>`)).join('')}</div>`:''}${goodTags(g,2,'span')}</a>`;
 }
 /* 홈의 '오늘' 한 줄: 교본 1장 · 오늘의 퍼즐 · 오프닝 1라인. 완료 여부는 각 페이지가 기기에 남긴 기록에서 읽는다 */
 function routineLine(){
   const ls=(k)=>{ try{ return JSON.parse(localStorage.getItem(k)||'null'); }catch(e){ return null; } };
   const day=new Date(Date.now()+9*3600*1000).toISOString().slice(0,10);
   const pd=ls('puzzle-day'), on=pd&&pd.date===day&&Array.isArray(pd.ids), pt=on?pd.daily:10, pn=on?pd.ids.slice(0,pd.daily).filter(id=>(pd.res||{})[id]).length:0;
-  const items=[['교본 1장',Object.values(ls('learn-done')||{}).includes(day),'learn.html?next=1'],
+  const pw=ls('puzzle-win'), wn=pw&&pw.date===day?pw.n:0, WIN_N=3;    // 굳히기 퍼즐: 유리하던 국면만 모은 묶음 (puzzle.html?cat=win)
+  const items=[['교본',Object.values(ls('learn-done')||{}).includes(day),'learn.html?next=1'],
     [`퍼즐 ${pn}/${pt}`,pt>0&&pn>=pt,'puzzle.html'],
-    ['오프닝 1라인',Object.values(ls('train-done')||{}).some(o=>Object.values(o||{}).some(l=>l&&l.last===day)),'train.html?next=1']];
+    [`굳히기 ${Math.min(wn,WIN_N)}/${WIN_N}`,wn>=WIN_N,'puzzle.html?cat=win'],
+    ['오프닝',Object.values(ls('train-done')||{}).some(o=>Object.values(o||{}).some(l=>l&&l.last===day)),'train.html?next=1']];
   return `<div class="routine" id="routine"><span class="k">오늘</span>${items.map(([n,d,u])=>`<a class="${d?'done':''}" href="${u}"><i>${d?'✓':''}</i>${n}</a>`).join('')}</div>`;
 }
 window.addEventListener('pageshow',()=>{ const el=document.getElementById('routine'); if(el) el.outerHTML=routineLine(); });
@@ -241,7 +268,13 @@ function coachSection(S){
   const co=coachOf(S); if(!co.cats.length) return '';
   const focus=co.focus.map(k=>catData(S,k)).filter(Boolean);
   return `<section id="s-coach" data-view="home"><h2>집중 과제<small>가장 비싼 실수 ${focus.length}가지와 두기 전 확인할 질문</small></h2>
-    <div class="card flist">${focus.map(focusRow).join('')}</div>${lastGameCard(S)}</section>`;
+    <div class="card flist">${focus.map(focusRow).join('')}</div>${byMoveCard(S)}${lastGameCard(S)}</section>`;
+}
+/* 수 구간별 대실수율: 오프닝(1~10수)보다 어느 구간이 얼마나 더 위험한지 한 줄 */
+function byMoveCard(S){
+  const rows=(S.blunder_by_move||[]).filter(r=>r.moves>=100); const a=rows.find(r=>r.label==='1-10'); if(!a||!a.rate||rows.length<2) return '';
+  const w=rows.filter(r=>r!==a).sort((x,y)=>y.rate-x.rate)[0]; const k=w.rate/a.rate; if(k<1.5) return '';
+  return `<a class="card bym" href="#" data-tab="stats" data-sub="phase"><div><b>${w.label.replace('-','~')}수 구간 대실수율 ${w.rate}%</b> <span class="sub">· 1~10수(${a.rate}%)의 ${k.toFixed(1)}배</span></div><div class="sub">오프닝을 벗어나면 확인이 느슨해집니다. 11수부터는 두기 전 상대의 체크·잡는 수부터 다시 보세요.</div><span class="go">수 구간별 ›</span></a>`;
 }
 /* 유형 하나의 상황 진단: 시간이 없어서인지, 서둘러서인지, 이기고 있어서인지 */
 function catDiag(c){
@@ -296,6 +329,7 @@ function showCat(key, scroll){
 function setSub(view,v){ SUB[view]=v; try{sessionStorage.setItem('chess-subs',JSON.stringify(SUB))}catch(e){}; applyView(); }
 document.addEventListener('click',(e)=>{
   const sb=e.target.closest('.subtabs button'); if(sb){ setSub(sb.parentElement.dataset.for,sb.dataset.sub); return; }
+  const bm=e.target.closest('a.bym'); if(bm){ e.preventDefault(); setSub('stats',bm.dataset.sub); if(VIEW!=='stats'){ VIEW='stats'; history.pushState(null,'','#stats'); applyView(); } window.scrollTo(0,0); return; }
   const oc=e.target.closest('[data-opencat]');
   if(oc){ e.preventDefault(); setSub('mistakes','cats'); if(VIEW!=='mistakes'){ VIEW='mistakes'; history.pushState(null,'','#mistakes'); applyView(); } showCat(oc.dataset.opencat,true); return; }
   const ch=e.target.closest('.cath'); if(ch){ const k=ch.dataset.cat; if(k===OPEN_CAT){ OPEN_CAT='-'; const el=ch.parentElement; el.classList.remove('open'); ch.setAttribute('aria-expanded','false'); el.querySelector('.catb').innerHTML=''; } else showCat(k,true); }
@@ -475,6 +509,7 @@ function render(){
     <div class="k">래피드 레이팅</div>
     <div class="big">${o.rating}<span class="delta ${up?'up':dn?'down':''}">${up?'▲':dn?'▼':''} ${Math.abs(rd)}</span></div>
     <div class="meta">최고 ${o.rating_best} · ${o.rating_start}에서 시작 · ${o.first_date.slice(5)} ~ ${o.last_date.slice(5)}</div>
+    ${tierRow(o)}
     ${S.rating_series&&S.rating_series.length>1?ratingChart(S.rating_series):''}
     <div class="lg">${(S.rating_series||[]).length<=RDOTS?`<span><i class="dot" style="background:var(--win)"></i>승</span><span><i class="dot" style="background:var(--loss)"></i>패</span><span><i class="dot" style="background:var(--draw)"></i>무</span>`:`<span>판마다의 레이팅</span>`}<span>그래프를 누르면 값과 결과 표시</span></div>
   </div>
@@ -487,7 +522,7 @@ function render(){
   </section>`;
   h+=ruleSection(S);
   h+=coachSection(S);
-  let hw=`<section id="s-weak" data-view="stats" data-sub="weak"><h2>경기 운영 보완점<small>시간·컨디션·마무리에서 뽑은 항목 · 누르면 추이</small></h2>`;
+  let hw=strengthSection(S)+`<section id="s-weak" data-view="stats" data-sub="weak"><h2>경기 운영 보완점<small>시간·컨디션·마무리에서 뽑은 항목 · 누르면 추이</small></h2>`;
   if(!S.weaknesses.length) hw+='<div class="empty">두드러진 약점이 없습니다.</div>';
   for(const w of S.weaknesses){ const ic={critical:'중요',serious:'주의',warning:'참고',good:'강점',hint:'표본 부족'}[w.level]||'';
     hw+=`<div class="card weak ${w.level}" data-weak="${S.weaknesses.indexOf(w)}"><div class="t"><span class="ic">${ic}</span>${esc(w.title)}</div><p>${esc(w.text)}</p><div class="go">추이 분석 ›</div></div>`; }

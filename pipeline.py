@@ -42,6 +42,12 @@ BRILL_LOSE_AFTER = -100  # 탁월한 수: 둔 뒤 평가가 이보다 낮으면(
 BRILL_V = "2"          # 탁월한 수 판정 규칙 버전. 바꾸면 다음 실행에서 모든 판을 다시 판정한다
 GREAT_GAIN = 100       # 대단한 수: 상대 대실수 전보다 이만큼(cp) 이상 좋아진 것을 최선 수로 굳힌 수
 GREAT_HIDDEN = 150     # 대단한 수: 둔 뒤 평가가 기물 수보다 이만큼 높아야(이득이 아직 기물로 드러나지 않음 = 전술을 찾은 것) 한다
+# 체스닷컴 래피드 레이팅 분포(전체 계정 기준 추정): (레이팅, 그 아래 비율 %). 출처: chess.com 블로그 "What Percentage of Chess.com Players
+# Are at Each Rating?" (2026-08). 공개 API 에는 백분위가 없어 이 표를 선형 보간한다. 활동 중인 계정만 세면 백분위는 이보다 낮다.
+RATING_PCT = [(100, 3), (400, 25), (600, 47), (800, 65), (1000, 80), (1200, 90), (1400, 95), (1600, 97.5), (1800, 99), (2000, 99.5), (2400, 99.95), (3000, 99.999)]
+# 롤(리그 오브 레전드) 솔로 랭크 티어 비율로 환산: (키, 이름, 그 티어까지의 누적 비율 %). 2025년 분포(아이언 5, 브론즈 15, 실버 22, 골드 24, 플래 17, 에메 10, 다이아 5, 마스터 1.2, 그마 0.6, 챌 0.2)
+TIERS = [("iron", "아이언", 5), ("bronze", "브론즈", 20), ("silver", "실버", 42), ("gold", "골드", 66), ("platinum", "플래티넘", 83), ("emerald", "에메랄드", 93),
+         ("diamond", "다이아몬드", 98), ("master", "마스터", 99.2), ("grandmaster", "그랜드마스터", 99.8), ("challenger", "챌린저", 100)]
 RATING_GAP = 25        # 상대 레이팅별 성적: 내 레이팅과 이 이상 차이 나면 높은/낮은 상대 (체스닷컴 매칭은 대개 ±40 안이다)
 WORKERS = 3
 UA = "chess-dashboard/1.0 (personal analysis; github.com/{owner}/{repo})"
@@ -1136,7 +1142,7 @@ def compute_stats(games, con=None):
         blunders_pg=round(sum(1 for p in mine if p["loss"] >= 300) / n, 2),
         opp_blunders_pg=round(sum(1 for p in opp if p["loss"] >= 300) / n, 2),
         rating=games[-1]["my_elo"], rating_best=max(g["my_elo"] for g in games), rating_start=games[0]["my_elo"],
-        first_date=games[0]["date"], last_date=games[-1]["date"],
+        first_date=games[0]["date"], last_date=games[-1]["date"], tier=tier_info(games[-1]["my_elo"]),
     )
     for c in "wb":
         gs = [g for g in games if g["my_color"] == c]
@@ -1292,6 +1298,8 @@ def compute_stats(games, con=None):
     # --- 최근 게임 / 최악의 실수
     avg_s = meta_get(con, "avg") if con is not None else None      # 평소 평균은 기간과 상관없이 전체 기간 것 (render_all 이 meta 에 둔다)
     avg = json.loads(avg_s) if avg_s else game_avg(games)
+    goods = {g["url"]: highlights(g["plies"], dict(g["summary"], outcome=g["outcome"]), avg) for g in games}
+    S["strengths"] = strength_stats([{h["key"] for h in goods[g["url"]] if h["key"] != "best"} for g in games])
     S["recent"] = []
     for g in games[-25:][::-1]:
         evals = [max(-1000, min(1000, p["cp_after"] if p["mine"] else -p["cp_after"])) for p in g["plies"]]
@@ -1301,7 +1309,7 @@ def compute_stats(games, con=None):
                                 **{k: g["summary"].get(k) for k in ("accuracy", "blunders", "mistakes", "hung", "missed_mate", "brilliant", "great",
                                                                     "my_final_clock", "opp_final_clock", "n_moves")},
                                 cats=Counter(p["cat"] for p in g["plies"] if p.get("cat")).most_common(),
-                                good=[dict(key=h["key"], title=h["title"], ply=h["ply"]) for h in highlights(g["plies"], dict(g["summary"], outcome=g["outcome"]), avg)],
+                                good=[dict(key=h["key"], title=h["title"], ply=h["ply"]) for h in goods[g["url"]]],
                                 worst=with_lines(con, worst_with_cat(g))))
     worst = []
     for g in games:
@@ -1371,6 +1379,21 @@ GOOD_MAX = 6           # 잘한 점: 게임 하나에 최대 몇 개까지 (우�
 GOOD_STREAK = 10       # 잘한 점 "연속 무실수": 내 수가 이만큼 이상, 그리고 내 수의 35% 이상 이어져야 한다
 GOOD_ACC_UP = 4        # 잘한 점 "정확도": 평소 평균보다 이만큼(%p) 이상 높아야 한다
 PHASE_LABEL = dict(opening="오프닝", middlegame="중반전", endgame="엔드게임")
+GOOD_LABEL = dict(brill="탁월한 수", great="대단한 수", mate="외통 수순 마무리", convert="유리한 판 굳히기", comeback="역전승", punish="상대 실수 바로 살림",
+                  acc="평소보다 높은 정확도", phase_opening="오프닝 정확", phase_middlegame="중반전 정확", phase_endgame="엔드게임 정확",
+                  streak="긴 연속 무실수", defend="불리할 때 버티기", noblunder="대실수 없는 판", clock="시계 관리")   # 강점 요약·주간 요약용 이름
+
+
+def strength_stats(goods, k=10):
+    """잘한 점 집계: goods 는 게임 순서대로 [게임의 highlights 키 집합]. 키마다 나온 판 수, 비율, 최근 k판 중 판 수."""
+    n = len(goods)
+    rows = []
+    for key, label in GOOD_LABEL.items():
+        g = sum(1 for s in goods if key in s)
+        if g:
+            rows.append(dict(key=key, label=label, games=g, share=round(g / n * 100, 1), recent=dict(k=min(k, n), games=sum(1 for s in goods[-k:] if key in s))))
+    rows.sort(key=lambda r: -r["games"])
+    return rows
 
 
 def highlights(plies, summary, avg=None):
@@ -1444,9 +1467,9 @@ def highlights(plies, summary, avg=None):
     # 9. 대실수가 없는 판
     if s.get("blunders") == 0 and len(mine) >= 15:
         out.append(dict(key="noblunder", title="대실수 없는 판", text=f"내 {len(mine)}수 중 대실수 0개, 실수 {s.get('mistakes', 0)}개.", ply=None))
-    # 10. 시간 관리: 20수 이상 두면서 한 번도 30초 아래로 내려가지 않음
+    # 10. 시간 관리: 20수 이상 두면서 한 번도 30초 아래로 내려가지 않았고, 30수 넘게 뒀거나 상대보다 시간이 많이 남음 (짧은 판에서는 당연해서 뺀다)
     clocks = [p["clock"] for p in mine if p.get("clock") is not None]
-    if len(mine) >= 20 and clocks and min(clocks) >= 30:
+    if len(mine) >= 20 and clocks and min(clocks) >= 30 and (len(mine) >= 30 or (s.get("my_final_clock") or 0) >= (s.get("opp_final_clock") or 0)):
         out.append(dict(key="clock", title="시계가 30초 아래로 내려간 적 없음", text=f"종료 시 {clk_txt(s.get('my_final_clock'))} 남음 (상대 {clk_txt(s.get('opp_final_clock'))}).", ply=None))
     if not out:      # 두드러진 것이 없어도 최선 수 비율은 보여 준다
         nb = sum(1 for p in mine if p.get("is_best") or p.get("loss") == 0)
@@ -1459,6 +1482,40 @@ def clk_txt(sec):
         return "-"
     sec = int(round(sec))
     return f"{sec // 60}:{sec % 60:02d}"
+
+
+def rating_percentile(rating):
+    """레이팅 → 체스닷컴 래피드 전체에서 그 아래 비율(%) (RATING_PCT 선형 보간)."""
+    pts = RATING_PCT
+    if rating <= pts[0][0]:
+        return pts[0][1] * rating / pts[0][0]
+    for (r0, p0), (r1, p1) in zip(pts, pts[1:]):
+        if rating <= r1:
+            return p0 + (p1 - p0) * (rating - r0) / (r1 - r0)
+    return pts[-1][1]
+
+
+def percentile_rating(below):
+    """rating_percentile 의 역함수: 그 아래 비율(%) → 레이팅."""
+    pts = RATING_PCT
+    for (r0, p0), (r1, p1) in zip(pts, pts[1:]):
+        if below <= p1:
+            return r0 + (r1 - r0) * (below - p0) / (p1 - p0)
+    return pts[-1][0]
+
+
+def tier_info(rating):
+    """레이팅 → 상위 비율과 롤식 티어. {below, top, tier, name, div, label, next_name, next_rating}.
+    div 는 티어 안 4단계(IV→I, 마스터 이상은 없음). next_rating 은 다음 티어에 드는 레이팅(추정)."""
+    below = rating_percentile(rating)
+    lo = 0.0
+    for i, (key, name, hi) in enumerate(TIERS):
+        if below < hi or i == len(TIERS) - 1:
+            div = None if hi > 99 else ["IV", "III", "II", "I"][min(3, int((below - lo) / (hi - lo) * 4))]
+            nxt = TIERS[i + 1] if i + 1 < len(TIERS) else None
+            return dict(below=round(below, 1), top=round(100 - below, 1), tier=key, name=name, div=div, label=name + (f" {div}" if div else ""),
+                        next_name=nxt[1] if nxt else None, next_rating=int(round(percentile_rating(hi) / 5.0) * 5) if nxt else None)
+        lo = hi
 
 
 def game_avg(games):
@@ -2153,7 +2210,7 @@ def weaknesses(S, games=None):
                 same = [g for g in games if g["my_color"] == c]
                 sub = [POINTS[g["outcome"]] for g in same if " ".join(p["san"] for p in g["plies"][:4]) == o["moves"]]
                 rest = [POINTS[g["outcome"]] for g in same if " ".join(p["san"] for p in g["plies"][:4]) != o["moves"]]
-                out.append(dict(level="warning", title=f"{name} 오프닝", key="opening", arg=[c, o["moves"]],
+                out.append(dict(level="warning", title=f"{name} 오프닝 {o['moves']}", key="opening", arg=[c, o["moves"]],
                                 ev=evidence(sub, rest) if games else None,
                                 text=f"{o['moves']} ({o['name']}) {o['n']}판 승률 {o['score']}%, "
                                      f"15수 안 대실수 {o['early_blunders']}회. 이 라인의 기본 계획을 하나 정해 두세요."))
@@ -2313,7 +2370,18 @@ def send_ntfy(cfg, title, message, click=None, tags=(), actions=(), png=None):
         return False
 
 
-def notify(cfg, game, summary, dashboard_url):
+def good_line(con, game, summary):
+    """알림용 '잘한 점' 한 줄: 그 판의 highlights 첫 항목 (없으면 None)."""
+    try:
+        plies = tag_mistakes([dict(r) for r in con.execute("SELECT * FROM plies WHERE url=? ORDER BY ply", (game["url"],))])
+        avg_s = meta_get(con, "avg")
+        h = highlights(plies, dict(summary, outcome=game["outcome"]), json.loads(avg_s) if avg_s else None)
+        return h[0]["title"] if h and h[0]["key"] != "best" else None
+    except Exception:
+        return None
+
+
+def notify(cfg, game, summary, dashboard_url, con=None):
     """게임 한 판의 결과 알림. 누르면 대시보드의 그 게임, 결정적 실수 장면으로 간다."""
     res = {"W": "승리", "D": "무승부", "L": "패배"}[game["outcome"]]
     how = {"checkmated": "체크메이트", "resigned": "기권", "timeout": "시간패", "abandoned": "포기"}
@@ -2334,6 +2402,9 @@ def notify(cfg, game, summary, dashboard_url):
         lines.append(f"탁월한 수 {summary['brilliant']}개 (기물을 내주고도 평가가 유지된 수)")
     if summary.get("great"):
         lines.append(f"대단한 수 {summary['great']}개 (상대 실수를 바로 응징)")
+    good = good_line(con, game, summary) if con is not None else None
+    if good:
+        lines.append(f"잘한 점: {good}")
     title = f"래피드 {res}{'(' + detail + ')' if detail else ''} · 레이팅 {game['my_elo']}"
     click = f"{dashboard_url.rstrip('/')}/game.html?id={game_id(game['url'])}{'&ply=' + str((w['move'] - 1) * 2 + (1 if w['mover'] == 'w' else 2)) if w else ''}"
     actions = [{"label": "대시보드", "url": dashboard_url}, {"label": "체스닷컴", "url": game["url"]}]
@@ -2389,7 +2460,7 @@ def send_queued(con, cfg, timeout=150):
             t0 = time.time()
             ok = wait_for_page(f"{base}games/{game_id(url)}.json", timeout)
             log(f"페이지 배포 {'확인' if ok else '대기 시간 초과'} ({time.time() - t0:.0f}s): {game_id(url)}")
-            notify(cfg, dict(g), json.loads(g["summary"]), base)
+            notify(cfg, dict(g), json.loads(g["summary"]), base, con)
             sent += 1
         q.remove(url)
         queue_save(q)
@@ -2427,6 +2498,11 @@ def weekly_message(con, now):
     worst = max((dict(g["summary"]["worst"], opp=g["opp"]) for g in cur if g["summary"].get("worst")), key=lambda w: w["wp_loss"], default=None)
     if worst and worst["wp_loss"] >= 10:
         lines.append(f"가장 아픈 수: {worst['move']}.{'' if worst['mover'] == 'w' else '..'}{worst['san']} (vs {worst['opp']}, 승률 −{worst['wp_loss']}%p, 정답 {worst['best']})")
+    avg_s = meta_get(con, "avg")
+    avg = json.loads(avg_s) if avg_s else None
+    cnt = Counter(k for g in cur for k in {h["key"] for h in highlights(g["plies"], dict(g["summary"], outcome=g["outcome"]), avg)} if k != "best")
+    if cnt:
+        lines.append("잘한 점: " + " · ".join(f"{GOOD_LABEL[k]} {v}판" for k, v in cnt.most_common(3)))
     if p:
         lines.append("괄호 안은 그 전주와의 차이")
     last_day = a1 - timedelta(days=1)
@@ -2514,6 +2590,7 @@ def puzzle_candidates(con, limit=200):
             w = dict(id=f"{game_id(g['url'])}-{p['ply']}", ply=p["ply"], url=g["url"], date=g["date"], opp=g["opp"], color=g["my_color"],
                      move=p["move"], mover=p["mover"], san=p["san"], best=p["best"], cp_before=p["cp_before"], cp_after=p["cp_after"],
                      wp_loss=p["wp_loss"], clock=p["clock"], phase=p["phase"], fen=p["fen"], cat=p.get("cat"),
+                     win=int(p["cp_before"] >= 300),            # 유리하던(+3 이상) 국면: 퍼즐 페이지의 '굳히기' 묶음
                      uci=b.parse_san(p["san"]).uci(), best_uci=b.parse_san(p["best"]).uci(),
                      best_line=L["best_line"], refutation=L.get("refutation", []), alts=L.get("alts", []),
                      legal=" ".join(sorted(legal)))   # 브라우저가 둘 수 없는 수를 걸러내는 데 쓴다
@@ -2602,7 +2679,7 @@ def main():
         con = db()
         g = con.execute("SELECT * FROM games WHERE analyzed=1 ORDER BY end_time DESC LIMIT 1").fetchone()
         if g:
-            notify(cfg, dict(g), json.loads(g["summary"]), dashboard_url(cfg))
+            notify(cfg, dict(g), json.loads(g["summary"]), dashboard_url(cfg), con)
         return
     if a.weekly_dry or a.weekly_now:
         msg = weekly_message(db(), datetime.now(KST))
@@ -2683,7 +2760,7 @@ def main():
         queue_save(queue_load() + [g["url"] for g in pending_notify if g["url"] not in queue_load()])
     elif not a.no_notify:
         for g in pending_notify:
-            notify(cfg, g, json.loads(g["summary"]), dashboard_url(cfg))
+            notify(cfg, g, json.loads(g["summary"]), dashboard_url(cfg), con)
     con.execute("UPDATE games SET notified=1 WHERE analyzed=1 AND notified=0")
     con.commit()
     if not a.no_notify and not a.render_only:

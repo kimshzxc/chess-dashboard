@@ -248,6 +248,9 @@ def run(c, base, server, shots):
     v = c.ev(VIS); check("홈에는 홈 섹션만 보인다", v and set(v) == {"home"}, v)
     o = c.ev(OVER); check("가로 넘침 없음 (홈)", o[0] <= o[1], o)
     check("히어로 레이팅 숫자", str(S["overview"]["rating"]) in (c.ev("document.querySelector('.herocard .big')?.textContent") or ""))
+    tier = S["overview"].get("tier") or {}
+    check("히어로 티어 엠블럼과 상위 비율", c.ev("!!document.querySelector('.tierrow svg.tier-badge')") and tier.get("label", "") in (c.ev("document.querySelector('.tierrow')?.textContent") or "")
+          and f"상위 {tier.get('top')}%" in (c.ev("document.querySelector('.tierrow')?.textContent") or "") and c.ev("document.querySelector('.tierrow svg').classList.contains('" + tier.get("tier", "") + "')"), tier.get("label"))
     nd = c.ev("document.querySelectorAll('#rchart circle:not(.xc-d)').length"); ns = len(S["rating_series"])
     check("레이팅 그래프: 판이 많으면 점 대신 선", nd == (ns if ns <= 150 else 0) and ("판마다의 레이팅" in c.ev("document.querySelector('.herocard .lg').textContent") if ns > 150 else True), (nd, ns))
     # 기록 내보내기·가져오기 (테마 패널의 '기록'): 내보낸 기록을 지운 뒤 가져오면 돌아오고, 양쪽 기록은 합쳐진다
@@ -271,6 +274,8 @@ def run(c, base, server, shots):
         vr = S.get("vs_rating") or []
         c.tap("[data-for='stats'] [data-sub='session']"); c.pump(0.3)
         nb = c.ev("document.querySelectorAll('.vsr tr').length")
+        st = S.get("strengths") or []
+        check("통계 보완점: 내 강점 표", c.ev("document.querySelectorAll('#s-strong tr').length") == len(st) + 1 and (not st or st[0]["label"] in (c.ev("document.querySelector('#s-strong').textContent") or "")), [r["key"] for r in st[:4]])
         check("상대 레이팅별 성적 표", bool(vr) and sum(x["n"] for x in vr) == S["overview"]["games"] and nb == 1 + sum(1 for x in vr if x["n"]) and vr[0]["label"] in c.ev("document.querySelector('.vsr').textContent"), (nb, [x["n"] for x in vr]))
         o = c.ev(OVER); check("가로 넘침 없음 (통계 컨디션)", o[0] <= o[1], o)
         snap("vs_rating")
@@ -332,6 +337,13 @@ def run(c, base, server, shots):
               c.ev("[...document.querySelectorAll('#s-coach .frow .fn')].map(e=>e.textContent)"))
         check("직전 판 피드백과 두기 전 질문", c.ev("!!document.querySelector('#s-coach .lastg')") and c.ev("[...document.querySelectorAll('#s-coach .frow .q')].filter(e=>e.textContent.trim()).length") == len(co["focus"]),
               (c.ev("document.querySelector('#s-coach .lastg .v')?.innerText") or "")[:50])
+        check("직전 판 카드: 세션 판 수", "세션" in (c.ev("document.querySelector('#s-coach .lastg .sess')?.textContent") or "") and "오늘" in (c.ev("document.querySelector('#s-coach .lastg .sess')?.textContent") or ""))
+        bym = [r for r in S.get("blunder_by_move", []) if r["moves"] >= 100]
+        if len(bym) >= 2 and bym[0]["rate"] and max(r["rate"] for r in bym[1:]) / bym[0]["rate"] >= 1.5:
+            check("집중 과제: 수 구간별 대실수율 카드", "배" in (c.ev("document.querySelector('#s-coach .bym')?.textContent") or ""))
+            c.tap("#s-coach .bym"); c.pump(0.6)
+            check("수 구간별 카드를 누르면 통계 > 국면", c.ev("location.hash") == "#stats" and c.ev("!document.querySelector('#s-phase')?.hidden || [...document.querySelectorAll('#main>section:not([hidden])')].every(s=>s.dataset.sub==='phase')"), c.ev("[...document.querySelectorAll('#main>section:not([hidden])')].map(s=>s.id)"))
+            c.go(base + "index.html" + q(), READY)
         dots = c.ev("[...document.querySelectorAll('#s-coach .frow')].map(f=>[f.querySelectorAll('.seq i').length, f.querySelectorAll('.seq i.hit').length])")
         want = [[x["recent"]["k"], x["recent"]["games"]] for x in co["cats"] if x["key"] in co["focus"]]
         check("집중 과제: 최근 판 점이 데이터와 같다", dots == want, dots)
@@ -502,7 +514,7 @@ def run(c, base, server, shots):
     check("판 뒤집기", lab0 != c.ev("[...document.querySelectorAll('#board svg text')].map(t=>t.textContent).join('')")); c.tap("#optflip", y_target=Y)
     c.tap("#graph", y_target=Y, fx=0.25); check("평가 그래프를 누르면 그 수로", abs(c.ev(CUR) - n * 0.25) <= 2, c.ev(CUR))
     if any(p.get("clock") is not None for p in G["plies"]):
-        check("시계 그래프가 있다", c.ev("document.querySelectorAll('#cchart path').length") >= 2 and c.ev("document.querySelectorAll('.legend .lk').length") == 2)
+        check("시계 그래프가 있다", c.ev("document.querySelectorAll('#cchart path').length") >= 2 and c.ev("document.querySelectorAll('.legend .lk').length") == 3 and c.ev("!!document.querySelector('#cchart .pace')"))
         c.tap("#cchart", y_target=Y, fx=0.5)
         check("시계 그래프를 누르면 그 수로 가고 두 시계 값이 뜬다", abs(c.ev(CUR) - n * 0.5) <= max(3, n * 0.12) and c.ev("document.querySelectorAll('#cchart ~ .tip.on .row').length") == 2,
               f"cur={c.ev(CUR)} / {n}, tip='{c.ev(TIP('cchart'))}'")
@@ -676,6 +688,15 @@ def run(c, base, server, shots):
             check("유형 연습은 오늘의 묶음을 건드리지 않고 기록에는 남는다", c.ev(LS("puzzle-day")) == day0 and sum(h["n"] for h in hist2.values()) == sum(h["n"] for h in hist1.values()) + 1)
             snap("puzzle_practice")
             check("모드 칩으로 오늘의 퍼즐로 돌아간다", c.ev("document.querySelector('.pzmodes a').getAttribute('href')") == "puzzle.html" and c.ev("document.querySelector('.pzmodes a.on')?.getAttribute('href')") == f"puzzle.html?cat={k}")
+            nwin = sum(1 for x in puzzles if x.get("win"))
+            if nwin:
+                check("굳히기 묶음: 유리하던 국면만", c.go(base + "puzzle.html?cat=win" + q("?"), "!!document.querySelector('#pzboard svg.board')")
+                      and "굳히기" in (c.ev("document.querySelector('.prog').innerText") or "") and all(BYID[i].get("win") for i in c.ev("JSON.parse(sessionStorage.getItem('puzzle-practice')).ids"))
+                      and c.ev("JSON.parse(sessionStorage.getItem('puzzle-practice')).ids.length") == nwin, nwin)
+                c.ev("[...document.querySelectorAll('#pzboard svg.board')].length"); c.tap("#giveup"); c.pump(0.5)
+                pw = c.ev(LS("puzzle-win"))
+                check("굳히기: 푼 수가 기기에 남는다", bool(pw) and pw.get("n") == 1, pw)
+                c.ev("localStorage.removeItem('puzzle-win')")
         errs = c.errors(); check("퍼즐 페이지에서 오류 없음", not errs, errs[:4])
 
     # ------------------------------------------------------------ 오프닝 연습
@@ -790,7 +811,10 @@ def run(c, base, server, shots):
     c.ev("localStorage.setItem('learn-done',JSON.stringify({values:new Date(Date.now()+9*3600*1000).toISOString().slice(0,10)}))")
     c.go(base + "index.html" + q(), READY)
     rt = c.ev("[...document.querySelectorAll('#routine a')].map(a=>[a.getAttribute('href'),a.classList.contains('done')])")
-    check("홈의 오늘 한 줄", rt and [r[0] for r in rt] == ["learn.html?next=1", "puzzle.html", "train.html?next=1"] and rt[0][1] is True, rt)
+    check("홈의 오늘 한 줄", rt and [r[0] for r in rt] == ["learn.html?next=1", "puzzle.html", "puzzle.html?cat=win", "train.html?next=1"] and rt[0][1] is True, rt)
+    c.ev("localStorage.setItem('puzzle-win',JSON.stringify({date:new Date(Date.now()+9*3600*1000).toISOString().slice(0,10),n:3,ok:2}))"); c.go(base + "index.html" + q(), READY)
+    check("오늘 한 줄: 굳히기 3문제를 풀면 완료", c.ev("document.querySelector('#routine a[href=\"puzzle.html?cat=win\"]')?.classList.contains('done')"))
+    c.ev("localStorage.removeItem('puzzle-win')")
     o = c.ev(OVER); check("가로 넘침 없음 (홈 오늘 한 줄)", o[0] <= o[1], o)
     snap("home_routine")
     errs = c.errors(); check("교본에서 오류 없음", not errs, errs[:4])

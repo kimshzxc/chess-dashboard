@@ -373,6 +373,19 @@ class WithDb(unittest.TestCase):
         self.assertEqual([x["key"] for x in h], ["best"]); self.assertIn("1개 (50%)", h[0]["title"])
         self.assertEqual(pipeline.highlights([], {}, None), [])
 
+    def test_tier_and_strengths(self):
+        t = pipeline.tier_info(1042)
+        self.assertEqual((t["tier"], t["div"], t["label"], t["next_name"]), ("platinum", "I", "플래티넘 I", "에메랄드"))
+        self.assertAlmostEqual(t["below"] + t["top"], 100.0, places=1)
+        self.assertGreater(t["next_rating"], 1042)
+        self.assertEqual(pipeline.tier_info(2300)["tier"], "challenger"); self.assertIsNone(pipeline.tier_info(2300)["div"])
+        self.assertEqual(pipeline.tier_info(50)["tier"], "iron")
+        for r in range(100, 2500, 50):                                                  # 레이팅이 오르면 백분위와 티어도 내려가지 않는다
+            self.assertLessEqual(pipeline.rating_percentile(r), pipeline.rating_percentile(r + 50))
+        rows = pipeline.strength_stats([{"punish", "clock"}, {"punish"}, set(), {"clock", "mate"}], k=2)
+        self.assertEqual([(r["key"], r["games"], r["share"], r["recent"]["games"]) for r in rows],
+                         [("punish", 2, 50.0, 0), ("clock", 2, 50.0, 1), ("mate", 1, 25.0, 1)])
+
     def test_game_export_and_coach_file(self):
         self.assertEqual(pipeline.export_missing_games(self.con), 24)
         g = json.load(open(os.path.join(pipeline.DOCS, "games", "1000.json")))
@@ -386,6 +399,8 @@ class WithDb(unittest.TestCase):
         coach = json.load(open(os.path.join(pipeline.DOCS, "coach.json")))
         full = json.load(open(os.path.join(pipeline.DOCS, "stats.json")))
         stats = full["windows"]["all"]["coach"]
+        self.assertIn("tier", full["windows"]["all"]["overview"]); self.assertIsInstance(full["windows"]["all"].get("strengths"), list)
+        self.assertTrue(all("win" in p for p in json.load(open(os.path.join(pipeline.DOCS, "puzzles.json")))))
         self.assertEqual(coach["focus"], stats["focus"])
         self.assertEqual(set(coach["cats"]), {c["key"] for c in stats["cats"]})
         self.assertEqual(list(full["windows"]), ["all"])                                  # 최근 구간은 따로 받는다
@@ -490,7 +505,7 @@ class WithDb(unittest.TestCase):
         calls = []
         orig = (pipeline.wait_for_page, pipeline.notify)
         pipeline.wait_for_page = lambda url, timeout=150, every=5: calls.append(("wait", url)) or True
-        pipeline.notify = lambda cfg, game, summary, base: calls.append(("notify", game["url"]))
+        pipeline.notify = lambda cfg, game, summary, base, con=None: calls.append(("notify", game["url"]))
         try:
             url = "https://www.chess.com/game/live/1003"
             pipeline.queue_save([url, "https://www.chess.com/game/live/does-not-exist"])

@@ -100,7 +100,7 @@ function renderMain(){
   h+=goodHTML();
   h+=`<div class="card"><div class="sub">평가 그래프 (누르면 이동 · 점: 실수/대실수)</div>${graphSVG()}</div>`;
   const cs=clockSVG();
-  if(cs) h+=`<div class="card"><div class="sub">남은 시간 (누르면 그 수로 이동)</div>${cs}<div class="legend"><span><i class="lk" style="background:var(--s1)"></i>나</span><span><i class="lk" style="background:var(--s2)"></i>상대</span><span><i class="dotk"></i>내가 45초 이상 쓴 수</span></div></div>`;
+  if(cs) h+=`<div class="card"><div class="sub">남은 시간 (누르면 그 수로 이동)</div>${cs}<div class="legend"><span><i class="lk" style="background:var(--s1)"></i>나</span><span><i class="lk" style="background:var(--s2)"></i>상대</span><span><i class="dotk"></i>내가 45초 이상 쓴 수</span><span><i class="lk dash"></i>기준 속도 (40수에 1분 남김)</span></div></div>`;
   const cnt=(who)=>{ const c={great:0,brill:0,best:0,good:0,inacc:0,mist:0,blun:0}; G.plies.forEach(p=>{ if(p.mine===who){ const k=p.cls==='miss'?'blun':p.cls; c[k]=(c[k]||0)+1; } }); return c; };
   const cm=cnt(1), co=cnt(0);
   h+=`<div class="tiles">
@@ -155,6 +155,9 @@ function clockSVG(){
   let h=`<div class="tchart-wrap"><svg class="tchart xchart" id="cchart" viewBox="0 0 ${W} ${H}" role="img" aria-label="수별 남은 시간">`;
   for(let v=0;v<=top;v+=step) h+=`<line x1="${L}" x2="${W-R}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" stroke="var(--line)" stroke-width="1"/><text x="${L-6}" y="${(y(v)+4).toFixed(1)}" font-size="11" text-anchor="end" fill="var(--muted)">${clk(v)}</text>`;
   h+=`<line id="ccur" x1="${L}" x2="${L}" y1="${T}" y2="${T+ph}" stroke="var(--muted)" stroke-width="1"/>`;
+  // 기준 속도(점선): 시작 시간에서 내 40수째에 1분이 남도록 고르게 쓰는 선. 내 선이 이 아래로 내려가면 그 구간에서 시간을 흘린 것
+  if(me[0]!=null&&me[0]>120){ const PACE_N=40, floor=60, pace=i=>Math.max(floor, me[0]-(me[0]-floor)*Math.min(1,(i/2)/PACE_N)); const iEnd=Math.min(n,PACE_N*2);
+    h+=`<path class="pace" d="M${x(0).toFixed(1)} ${y(me[0]).toFixed(1)} L${x(iEnd).toFixed(1)} ${y(pace(iEnd)).toFixed(1)}${iEnd<n?` L${x(n).toFixed(1)} ${y(floor).toFixed(1)}`:''}" fill="none" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="4 4"/>`; }
   h+=`<path d="${path(op)}" fill="none" stroke="var(--s2)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
   h+=`<path d="${path(me)}" fill="none" stroke="var(--s1)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
   G.plies.forEach((p,i)=>{ if(p.mine&&p.spent!=null&&p.spent>=45&&p.clock!=null) h+=`<circle cx="${x(i+1).toFixed(1)}" cy="${y(p.clock).toFixed(1)}" r="4" fill="var(--s1)" stroke="var(--surface)" stroke-width="2"/>`; });

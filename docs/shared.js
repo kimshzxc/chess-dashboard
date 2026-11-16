@@ -5,6 +5,23 @@ const ev = (cp)=> cp==null?'-':Math.abs(cp)>=9000 ? (cp>0?'#승':'#패') : ((cp>
 const evW = (cp)=> cp==null?'-':Math.abs(cp)>=9000 ? ('M'+Math.round((10000-Math.abs(cp))/10)) : ((cp>0?'+':'')+(cp/100).toFixed(1));
 const mv = (w)=> `${w.move}.${w.mover==='w'?'':'..'}${w.san}`;
 const pct=(v)=> v==null?'-':v+'%';
+/* 롤식 티어 문장(엠블럼): 방패 + 티어 색. 브론즈부터 보석, 골드부터 월계수, 플래티넘부터 날개, 다이아부터 왕관, 마스터부터 별 1~3개. 직접 그린 그림이라 저작권 문제가 없다 */
+const TIER_STYLE={iron:['#8d9299','#4a4e55'],bronze:['#c98551','#6e3f1c'],silver:['#d6dde6','#7a8391'],gold:['#f6cf5a','#a8731a'],platinum:['#6fe0d2','#1f7a73'],
+  emerald:['#4fd58a','#1a6b3f'],diamond:['#86c3ff','#2f5fb3'],master:['#c084f5','#5c2a9a'],grandmaster:['#ff6b6b','#8f1f1f'],challenger:['#ffe08a','#3a7bd5']};
+function tierBadge(key,size=56){
+  const [c1,c2]=TIER_STYLE[key]||TIER_STYLE.iron, order=Object.keys(TIER_STYLE), r=order.indexOf(key), id=`tg-${key}-${size}`;
+  let h=`<svg class="tier-badge ${key}" width="${size}" height="${size}" viewBox="0 0 64 64" role="img" aria-label="${key}"><defs><linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${c1}"/><stop offset="1" stop-color="${c2}"/></linearGradient></defs>`;
+  if(r>=4) h+=`<path d="M12 22 L2 14 L6 30 L3 40 L14 36 Z M52 22 L62 14 L58 30 L61 40 L50 36 Z" fill="${c2}" opacity=".85"/>`;                      // 날개
+  h+=`<path d="M32 5 L53 12 V31 C53 44 44 54 32 60 C20 54 11 44 11 31 V12 Z" fill="url(#${id})" stroke="${c2}" stroke-width="2"/>`;             // 방패
+  h+=`<path d="M32 12 L47 17 V31 C47 41 40 48 32 52 C24 48 17 41 17 31 V17 Z" fill="none" stroke="rgba(255,255,255,.35)" stroke-width="1.5"/>`;
+  if(r>=3) h+=`<path d="M19 46 C14 40 13 33 15 27 M45 46 C50 40 51 33 49 27" fill="none" stroke="rgba(255,255,255,.55)" stroke-width="2" stroke-linecap="round"/>`;   // 월계수
+  if(r>=1) h+=`<path d="M32 22 L41 32 L32 44 L23 32 Z" fill="rgba(255,255,255,.9)" stroke="${c2}" stroke-width="1.2"/><path d="M27 32 L32 25 L37 32 Z" fill="${c1}" opacity=".9"/>`;   // 보석
+  else h+=`<circle cx="32" cy="33" r="8" fill="rgba(255,255,255,.25)" stroke="${c2}" stroke-width="1.5"/>`;
+  if(r>=6) h+=`<path d="M22 12 L26 4 L32 10 L38 4 L42 12 Z" fill="${c1}" stroke="${c2}" stroke-width="1.2"/>`;                                    // 왕관
+  const stars=r>=9?3:r>=8?2:r>=7?1:0;
+  for(let i=0;i<stars;i++){ const cx=32+(i-(stars-1)/2)*10; h+=`<path transform="translate(${cx} 57) scale(.45)" d="M0 -8 L2.4 -2.6 L8 -2.4 L3.6 1.3 L5 7 L0 3.8 L-5 7 L-3.6 1.3 L-8 -2.4 L-2.4 -2.6 Z" fill="#fff" stroke="${c2}" stroke-width="1.5"/>`; }
+  return h+'</svg>';
+}
 const PH={opening:'오프닝',middlegame:'중반',endgame:'엔드게임'};
 const gameId=(url)=> (url||'').split('/').pop();
 const RED='#e5484d', GREEN='#2fb564', BLUE='#3b82f6', GRAY='#8a8883';

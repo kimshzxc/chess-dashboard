@@ -37,6 +37,7 @@ header{position:static;border-bottom:0;padding:calc(12px + env(safe-area-inset-t
 .key:last-child{border-bottom:0}
 .tiles{margin-bottom:12px}
 .legend i.lk{width:14px;height:3px;border-radius:2px;vertical-align:middle}
+.legend i.lk.dash{background:repeating-linear-gradient(90deg,var(--muted) 0 3px,transparent 3px 5px)}
 .legend i.dotk{width:9px;height:9px;border-radius:50%;background:var(--s1);box-shadow:0 0 0 2px var(--surface),0 0 0 3px var(--line2)}
 #cchart{cursor:pointer;margin-top:8px}
 /* 이 판의 교훈 */
