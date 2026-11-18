@@ -200,11 +200,11 @@ function parseFen(fen){
   return out;
 }
 function sqXY(sq,flip){ let x=FILES.indexOf(sq[0]), y=8-(+sq[1]); if(flip){x=7-x;y=7-y;} return [x*100,y*100]; }
-function arrow(from,to,color,flip){
+function arrow(from,to,color,flip,dash){
   const [x1,y1]=sqXY(from,flip).map(v=>v+50),[x2,y2]=sqXY(to,flip).map(v=>v+50);
   const dx=x2-x1,dy=y2-y1,len=Math.hypot(dx,dy); if(!len) return '';
   const ux=dx/len,uy=dy/len, head=28, w=11, ex=x2-ux*head, ey=y2-uy*head, px=-uy, py=ux;
-  return `<line x1="${x1+ux*22}" y1="${y1+uy*22}" x2="${ex}" y2="${ey}" stroke="${color}" stroke-width="${w}" stroke-linecap="round" opacity=".85"/>
+  return `<line x1="${x1+ux*22}" y1="${y1+uy*22}" x2="${ex}" y2="${ey}" stroke="${color}" stroke-width="${w}" stroke-linecap="round" opacity=".85"${dash?' stroke-dasharray="16 14" class="dash"':''}/>
   <polygon points="${x2},${y2} ${ex+px*18},${ey+py*18} ${ex-px*18},${ey-py*18}" fill="${color}" opacity=".85"/>`;
 }
 function boardSVG(fen, o={}){
@@ -216,7 +216,7 @@ function boardSVG(fen, o={}){
     h+=`<text x="${i*100+4}" y="796" font-size="22" fill="${i%2?'var(--sq-l)':'var(--sq-d)'}" font-family="system-ui" font-weight="600">${fl}</text>`;
     h+=`<text x="784" y="${i*100+24}" font-size="22" fill="${i%2?'var(--sq-d)':'var(--sq-l)'}" font-family="system-ui" font-weight="600">${rk}</text>`; }
   for(const {sq,p} of parseFen(fen)){ const [x,y]=sqXY(sq,flip); h+=`<use href="#${THEME.pieces}-${p}" x="${x}" y="${y}" width="100" height="100"/>`; }
-  for(const [uci,color] of (o.arrows||[])){ if(uci) h+=arrow(uci.slice(0,2),uci.slice(2,4),color,flip); }
+  for(const [uci,color,dash] of (o.arrows||[])){ if(uci) h+=arrow(uci.slice(0,2),uci.slice(2,4),color,flip,dash); }   // dash: 점선 (복기의 "대신 뒀어야 할 수")
   return h+'</svg>';
 }
 

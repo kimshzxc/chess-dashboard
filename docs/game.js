@@ -5,6 +5,9 @@ $('#tpanel-slot').innerHTML=themePanel(); applyMode();
 $('#backbtn').innerHTML=icon('back')+'게임';
 const params=new URLSearchParams(location.search);
 const ID=params.get('id'); let G=null, IDX=0, FLIP=false, SHOW_BEST=true;
+/* 화살표 규칙: 초록 실선 = 지금 보이는 국면에서 둘 차례인 쪽의 엔진 추천 (차례와 항상 맞는다).
+   주황 점선 = 내가 방금 둔 실수 대신 뒀어야 할 수 (내 부정확·실수·대실수·놓침에만, 상대의 수와 대단한·탁월한 수에는 없음). */
+const AMBER='#f5a524', FIX_CLS=new Set(['inacc','mist','blun','miss']);
 let COACH=null;   // coach.json: 전체 기간의 집중 과제와 유형별 최근 빈도 (없어도 페이지는 동작한다)
 /* 둬 보기: 현재 국면(IDX)에서 아무 수나 둬 보고 브라우저 엔진(engine.js)의 평가를 본다.
    VAR = 둬 본 수 [{san, uci, fen}], VSEL = 고른 칸, VRES = 마지막 국면의 엔진 결과, VTHINK = 분석 중, VERR = 엔진 오류 문구 */
@@ -187,7 +190,7 @@ function draw(){
   const n=G.plies.length; const inVar=VAR.length>0; const fen=inVar?VAR[VAR.length-1].fen:G.fens[IDX]; const p=IDX>0?G.plies[IDX-1]:null; const nx=IDX<n?G.plies[IDX]:null;
   const arrows=[]; let last=p?[p.uci.slice(0,2),p.uci.slice(2,4)]:[];
   if(inVar){ const v=VAR[VAR.length-1]; last=[v.uci.slice(0,2),v.uci.slice(2,4)]; if(SHOW_BEST&&VRES&&VRES.best&&!VRES.over) arrows.push([VRES.best,GREEN]); }
-  else if(SHOW_BEST){ if(p&&p.cls!=='best'&&p.cls!=='good'&&p.best_uci) arrows.push([p.best_uci,GREEN]); else if(nx&&nx.best_uci) arrows.push([nx.best_uci,GREEN]); }
+  else if(SHOW_BEST){ if(nx&&nx.best_uci) arrows.push([nx.best_uci,GREEN]); if(p&&p.mine&&FIX_CLS.has(p.cls)&&p.best_uci&&p.best_uci!==p.uci) arrows.push([p.best_uci,AMBER,true]); }
   if(VSEL) last=[VSEL];
   $('#board').innerHTML=boardSVG(fen,{flip:FLIP,arrows,last});
   if(VSEL){   // 고른 기물이 갈 수 있는 칸: 빈 칸은 점, 잡는 칸은 고리 (퍼즐과 같은 표시)
@@ -204,8 +207,8 @@ function draw(){
     info=`<div><span class="cls ${c[1]}">${c[0]}</span> <b>${mv(p)}</b> <span class="sub">(${who}) · 평가 ${ev(p.cp_before)} → ${ev(p.cp_after)}${p.wp_loss?` · 승률 −${p.wp_loss}%p`:''}</span></div>`;
     if(p.cls==='great'){ const prev=G.plies[IDX-2]; info+=`<div class="sub" style="margin-top:3px">${esc(GREAT_D)}${prev?` 상대의 ${esc(prev.san)} (${ev(-prev.cp_before)} → ${ev(p.cp_before)}) 를 응징했습니다.`:''}</div>`; }
     else if(p.cls==='brill'){ const L=G.lines[String(IDX)]||{}; info+=`<div class="sub" style="margin-top:3px">${esc(BRILL_D)}</div>`+(L.take?`<div style="margin-top:3px">${esc(L.take)} 로 잡으면 평가 <b>${ev(L.take_cp)}</b>${L.refutation&&L.refutation.length?` · 수순 <span class="mono">${esc(L.refutation.map(s=>s.san).join(' '))}</span>`:''}</div>`:''); }
-    else if(p.cls!=='best'&&p.cls!=='good'&&p.best) info+=`<div style="margin-top:3px">정답은 <b class="mono">${esc(p.best)}</b> (초록 화살표)</div>`;
-    else if(nx&&SHOW_BEST) info+=`<div class="sub" style="margin-top:3px">다음 국면 엔진 추천: ${esc(nx.best)} (초록 화살표)</div>`;
+    else if(p.cls!=='best'&&p.cls!=='good'&&p.best) info+=p.mine?`<div style="margin-top:3px">정답은 <b class="mono">${esc(p.best)}</b>${SHOW_BEST?' <span class="sub">(주황 점선 화살표)</span>':''}</div>`:`<div class="sub" style="margin-top:3px">상대는 ${esc(p.best)} 가 더 나았습니다</div>`;
+    if(nx&&SHOW_BEST) info+=`<div class="sub" style="margin-top:3px">이 국면 엔진 추천: ${esc(nx.best)} (초록 화살표)</div>`;
     if(p.mine&&p.cat) info+=`<div style="margin-top:5px">${catTag(p.cat,COACH&&COACH.focus&&COACH.focus.includes(p.cat)?'rep':'')} <span class="sub">${esc(catOf(p.cat).d)}</span></div>`;
     info+=`<div class="sub" style="margin-top:3px">남은 시간 ${clk(p.clock)}${p.spent!=null?` · 이 수에 ${Math.round(p.spent)}초`:''}</div>`;
     const L=G.lines[String(IDX)];

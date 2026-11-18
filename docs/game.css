@@ -53,4 +53,3 @@ header{position:static;border-bottom:0;padding:calc(12px + env(safe-area-inset-t
 .top .tools{display:flex;gap:8px}
 #optflip,#optbest{width:42px;padding:0;flex:none}
 #optflip svg,#optbest svg{width:18px;height:18px}
-#optbest.on{color:var(--good);border-color:var(--good)}

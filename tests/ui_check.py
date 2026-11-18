@@ -545,6 +545,26 @@ def run(c, base, server, shots):
         c.tap("#good .key[data-jump]", y_target=640); c.pump(0.3)
         check("게임 페이지: 잘한 것을 누르면 그 장면으로", c.ev(CUR) == gj1["ply"], f"{c.ev(CUR)} vs {gj1['ply']}")
         c.ev("document.querySelector('#good').scrollIntoView({block:'start'})"); c.pump(0.3); snap("game_good")
+    # 화살표 규칙: 초록 실선은 보이는 국면에서 둘 차례인 쪽의 수, 주황 점선은 내 실수 대신 둘 수 (상대의 실수에는 없다)
+    ARROWS = "[...document.querySelectorAll('#board svg.board line[stroke]')].filter(l=>l.getAttribute('stroke-width')==='11').map(l=>[l.getAttribute('stroke'),!!l.getAttribute('stroke-dasharray')])"
+    def side_of(ply):   # 그 수를 둔 뒤 국면에서 둘 차례
+        return "w" if ply % 2 == 0 else "b"
+    def from_piece(ply, uci):   # 초록 화살표 출발 칸의 기물 색
+        b = chess.Board()
+        for p in gj["plies"][:ply]: b.push_uci(p["uci"])
+        pc = b.piece_at(chess.parse_square(uci[:2])); return "w" if pc and pc.color else ("b" if pc else None)
+    mine_bad = next((i + 1 for i, p in enumerate(gj["plies"][:-1]) if p["mine"] and p["cls"] in ("inacc", "mist", "blun", "miss") and p["best_uci"] != p["uci"]), None)
+    opp_bad = next((i + 1 for i, p in enumerate(gj["plies"][:-1]) if not p["mine"] and p["cls"] in ("inacc", "mist", "blun", "miss")), None)
+    for label, ply, want in (("내 실수", mine_bad, [["#2fb564", False], ["#f5a524", True]]), ("상대 실수", opp_bad, [["#2fb564", False]])):
+        if ply is None:
+            continue
+        c.go(base + f"game.html?id={gid}&ply={ply}" + q("?"), "!!document.querySelector('#board svg.board')"); c.pump(0.3)
+        nxt = gj["plies"][ply]
+        check(f"게임 페이지: {label} 뒤 화살표 (초록 실선{' + 주황 점선' if len(want) > 1 else '만'})", c.ev(ARROWS) == want and from_piece(ply, nxt["best_uci"]) == side_of(ply), (c.ev(ARROWS), ply))
+        info = c.ev("document.querySelector('#info')?.textContent") or ""
+        check(f"게임 페이지: {label} 설명", ("정답은" in info and "주황 점선" in info) if label == "내 실수" else ("더 나았습니다" in info and "정답은" not in info), info[:60])
+        if label == "내 실수": snap("game_arrows")
+    check("게임 페이지: 화살표 버튼 아이콘이 바탕과 다른 색", c.ev("(()=>{const b=document.querySelector('#optbest'),s=getComputedStyle(b); return b.classList.contains('on')&&s.color!==s.backgroundColor&&!!b.querySelector('svg')})()"))
     gl = [i for i, p in enumerate(gj["plies"]) if p["cls"] == "great"]
     check("게임 페이지: 대단한 수 배지", (not gl) or (c.ev("document.querySelectorAll('.card.good .cls.great').length") == len(gl)), len(gl))
     bw = next(iter((S.get("brilliant") or {}).get("list", [])), None)
