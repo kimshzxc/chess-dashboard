@@ -78,11 +78,14 @@ jobs:
           # 바뀐 데이터를 커밋하고 올린다. 올릴 것이 없거나 올리기에 성공하면 0.
           # 푸시가 실패하면 need_push 가 남아 다음 반복에서 다시 시도한다 (새 변경이 없어도).
           # 생성 파일이 원격과 충돌하면 이 러너의 것을 택한다 (-X theirs: 리베이스에서는 다시 얹는 내 커밋 쪽).
+          # sync keep : 이번 반복의 변경은 담지 않고(파이프라인이 실패한 반복) 밀린 커밋만 올린다
           sync() {
-            git add data/chess.db docs
-            if ! git diff --cached --quiet; then
-              git commit -q -m "update $(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M')"
-              need_push=1
+            if [ "${1:-}" != keep ]; then
+              git add data/chess.db docs
+              if ! git diff --cached --quiet; then
+                git commit -q -m "update $(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M')"
+                need_push=1
+              fi
             fi
             [ "$need_push" -eq 0 ] && return 0
             if git pull -q --rebase -X theirs origin main && git push -q origin HEAD:main; then
@@ -91,17 +94,28 @@ jobs:
             git rebase --abort >/dev/null 2>&1 || true
             echo "푸시 실패 (다음 반복에서 재시도)"; return 1
           }
-          end=$(( SECONDS + WATCH_MINUTES * 60 )); i=0; fails=0
+          end=$(( SECONDS + (WATCH_MINUTES - 15) * 60 )); i=0; fails=0; pfails=0   # 마지막 반복이 길어도 6시간 작업 한도 안에 끝나도록 15분 여유
           echo "감시 시작: ${WATCH_MINUTES}분 동안 1분마다 확인 (10분마다 전체 확인, 5분마다 코드 갱신)"
           while [ $SECONDS -lt $end ]; do
             i=$((i + 1))
             flag="--quick"; [ $((i % 10)) -eq 1 ] && flag=""
             # 알림은 바로 보내지 않고 쌓아 두었다가, 푸시와 페이지 배포가 끝난 뒤에 보낸다
+            ok=1
             if python pipeline.py --defer-notify $flag; then fails=0; else
-              fails=$((fails + 1)); echo "파이프라인 오류 ${fails}회 연속 (계속 진행)"
+              ok=0; fails=$((fails + 1)); echo "파이프라인 오류 ${fails}회 연속 (계속 진행)"
               if [ $fails -eq 5 ]; then curl -s -o /dev/null -H "Title: chess pipeline 오류" -H "Tags: warning" -H "Click: $RUN_URL" -d "파이프라인이 5회 연속 실패했습니다. Actions 로그를 확인하세요." "https://ntfy.sh/$NTFY_TOPIC" || true; fi
             fi
-            if sync; then python pipeline.py --send-queued || true; fi
+            # 실패한 반복의 결과물은 커밋하지 않는다 (깨진 상태가 사이트에 올라가지 않게). 밀린 푸시가 있으면 그것만 다시 시도
+            if [ $ok -eq 1 ] || [ "$need_push" -eq 1 ]; then
+              mode=""; [ $ok -eq 0 ] && mode=keep
+              if sync $mode; then pfails=0; python pipeline.py --send-queued || true; else
+                pfails=$((pfails + 1))
+                if [ $pfails -eq 5 ]; then
+                  curl -s -o /dev/null -H "Title: chess pipeline 푸시 실패" -H "Tags: warning" -H "Click: $RUN_URL" -d "푸시가 5회 연속 실패해 원격 main 으로 되돌립니다. 분석은 다음 반복에서 다시 합니다." "https://ntfy.sh/$NTFY_TOPIC" || true
+                  git fetch -q origin main && git reset -q --hard origin/main && need_push=0 && pfails=0 && echo "원격 main 으로 되돌림"
+                fi
+              fi
+            fi
             if [ $((i % 5)) -eq 0 ] && [ "$need_push" -eq 0 ]; then git pull -q --rebase origin main || git rebase --abort >/dev/null 2>&1 || true; fi
             sleep 60
           done
@@ -115,7 +129,7 @@ jobs:
         run: gh workflow run pipeline.yml --ref main
 
       - name: 실패 알림
-        if: failure()
+        if: failure() || cancelled()
         env:
           GH_TOKEN: ${{ github.token }}
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}

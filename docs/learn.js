@@ -1,17 +1,13 @@
 /* 교본: learn.html[?c=<장 id> | ?cat=<실수 유형> | ?rep=<오프닝 id>]. shared.js 다음에 module 로 로드된다.
    lessons.json 은 lessons/build.py 가 원고(lessons/content.py)에서 만든다. 블록 종류: p, h, list, tip, board(그림), line(넘겨 보는 수순), try(한 수 문제).
    learn-done (localStorage)  {장 id: 읽은 날짜} */
-document.body.insertAdjacentHTML('afterbegin', await fetch('pieces.svg').then(r=>r.text()));
+try{ document.body.insertAdjacentHTML('afterbegin', await fetch('pieces.svg').then(r=>{ if(!r.ok) throw new Error(`pieces.svg ${r.status}`); return r.text(); })); }catch(e){ loadError(e); throw e; }
 const get=(u)=>fetch(u,{cache:'no-cache'}).then(r=>r.ok?r.json():null).catch(()=>null);
 const [LES,COACH,BOOK]=await Promise.all([get('lessons.json'),get('coach.json'),get('book.json')]);
 $('#tpanel-slot').innerHTML=themePanel(); applyMode(); $('#pnav').innerHTML=practiceNav('learn');
 const Q=new URLSearchParams(location.search);
 const CH=(LES&&LES.chapters)||[], PARTS=(LES&&LES.parts)||[], OPS=(BOOK&&BOOK.openings)||{};
-const VERD={weak:['취약','critical'],weak_hint:['취약 조짐','serious'],strong:['강점','good'],strong_hint:['강점 조짐','good'],even:['평균 수준','']};
-const load=(k,d)=>{ try{ const v=JSON.parse(localStorage.getItem(k)||'null'); return v??d; }catch(e){ return d; } };
-const save=(k,v)=>{ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} };
 const DONE=load('learn-done',{});
-const today=()=>new Date(Date.now()+9*3600*1000).toISOString().slice(0,10);
 const md=(s)=>esc(s).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/`(.+?)`/g,'<span class="mono mv">$1</span>');
 const url=(id)=>`learn.html?c=${encodeURIComponent(id)}`;
 const weakRep=(c)=>c.rep.map(r=>OPS[r]).find(o=>o&&o.verdict.startsWith('weak'));
@@ -113,11 +109,6 @@ async function drawMine(c){
   if(!ws.length) return;
   el.innerHTML=`<h2>${title}</h2><p class="sub">${sub}</p>`+ws.map(w=>mineCard(w,w.n?`${w.n}번 · ${w.color==='w'?'백':'흑'}`:`${w.date.slice(5)} ${w.color==='w'?'백':'흑'} vs ${esc(w.opp)}`)).join('');
   drawAll(el); applyTheme();
-}
-function squareAt(svg,e,flip){
-  const r=svg.getBoundingClientRect(); let fx=Math.floor((e.clientX-r.left)/r.width*8), ry=Math.floor((e.clientY-r.top)/r.height*8);
-  if(fx<0||fx>7||ry<0||ry>7) return null; if(flip){ fx=7-fx; ry=7-ry; }
-  return FILES[fx]+(8-ry);
 }
 document.addEventListener('pointerdown',(e)=>{
   const svg=e.target.closest('.tryb svg.board'); if(!svg) return;

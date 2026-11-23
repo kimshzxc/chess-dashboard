@@ -1,13 +1,15 @@
 /* 대시보드. shared.js(공용 함수) 다음에 module 로 로드된다. */
-const [PIECES, DATA] = await Promise.all([
-  fetch('pieces.svg').then(r=>r.text()),
-  fetch('stats.json',{cache:'no-cache'}).then(r=>r.json()),
-]);
+let PIECES, DATA, LAST_FETCH=Date.now();
+const getJSON=async(u)=>{ const r=await fetch(u,{cache:'no-cache'}); if(!r.ok) throw new Error(`${u} ${r.status}`); return r.json(); };
+try{ [PIECES, DATA] = await Promise.all([fetch('pieces.svg').then(r=>{ if(!r.ok) throw new Error(`pieces.svg ${r.status}`); return r.text(); }), getJSON('stats.json')]); }
+catch(e){ loadError(e); throw e; }
 document.body.insertAdjacentHTML('afterbegin', PIECES);
 document.title = `${DATA.username} 래피드 분석`;
 let W = 'all';
 $('#tpanel-slot').innerHTML=themePanel(); applyMode();
 
+/* 'YYYY-MM-DD HH:MM'(KST) 가 얼마나 지났는지 */
+const ageTxt=(g)=>{ const t=Date.parse(g.replace(' ','T')+':00+09:00'); if(isNaN(t)) return ''; const m=Math.round((Date.now()-t)/60000); return m<1?', 방금':m<60?`, ${m}분 전`:m<1440?`, ${Math.round(m/60)}시간 전`:`, ${Math.round(m/1440)}일 전`; };
 const gameLink=(url,ply)=>`game.html?id=${gameId(url)}${ply?`&ply=${ply}`:''}`;
 const plyOf=(w)=> (w.move-1)*2+(w.mover==='w'?1:2);
 
@@ -53,7 +55,7 @@ const fmtD=(t,d)=>{ const sg=d>0?'+':d<0?'−':'±'; const a=Math.abs(d);
 const niceStep=(r)=>{ if(r<=0) return 1; const p=Math.pow(10,Math.floor(Math.log10(r))); const m=r/p; return (m<1.5?1:m<3.5?2:m<7.5?5:10)*p; };
 function trendChart(t){
   const N=t.series.length; if(N<2) return '';
-  const W=360,H=180,L=46,R=14,T=16,B=34,pw=W-L-R,ph=H-T-B;
+  const W=chartW(true),H=180,L=46,R=14,T=16,B=34,pw=W-L-R,ph=H-T-B;
   const sc=t.fmt==='pct'?100:1;
   const vals=t.series.map(s=>s[1]/s[2]*sc);
   const win=Math.max(5,Math.min(20,Math.round(N/8)));
@@ -73,10 +75,12 @@ function trendChart(t){
   CHARTS[id]={N,L,pw,W,x,ys:i=>y(roll[i]),tip:i=>`${t.series[i][0]} · 이 판 ${fmtV(t,vals[i]/sc)} · 최근 ${win}판 평균 ${fmtV(t,roll[i]/sc)}`};
   return h;
 }
+/* 선 그래프의 viewBox 너비: 그려질 자리의 실제 픽셀 너비에 맞춘다. 360 고정이면 데스크톱(720px)에서 두 배로 확대돼 축 글자가 커진다 */
+function chartW(sheet){ const m=$('#main'); let w=sheet?Math.min(720,window.innerWidth):(m?Math.min(720,m.clientWidth):0); return w>400?Math.round(w-34):360; }
 const RDOTS=150;   // 이 판 수까지만 레이팅 그래프에 승·패 점을 찍는다
 function ratingChart(series){
   const N=series.length; if(N<2) return '';
-  const W=360,H=170,L=40,R=12,T=14,B=30,pw=W-L-R,ph=H-T-B;
+  const W=chartW(),H=170,L=40,R=12,T=14,B=30,pw=W-L-R,ph=H-T-B;
   const vals=series.map(s=>s[1]);
   let lo=Math.min(...vals), hi=Math.max(...vals); if(hi-lo<10){ hi=lo+10; }
   const step=niceStep((hi-lo)/3); lo=Math.floor(lo/step)*step; hi=Math.ceil(hi/step)*step;
@@ -167,7 +171,7 @@ function tierRow(o){
   const src=a&&a.exact?`체스닷컴 전적 페이지(프로필 › 통계 › 래피드)에 ${a.date.slice(5)} 표시된 백분위 그대로입니다.`
     :`체스닷컴 전적 페이지에 ${live?'':'(기본값) '}${a?`${a.date.slice(5)} 표시된 백분위(${a.rating}점 ${a.below}%)`:'표시된 백분위'}에 맞춰 분포표를 보정한 추정치입니다. 전적 페이지를 다시 읽으면 정확한 값이 됩니다.`;
   const approx=a&&a.exact?'':'약 ';
-  return `<div class="tierrow" title="${src} 티어는 그 백분위를 롤 솔로 랭크 티어 비율에 맞춰 환산한 것입니다.">체스닷컴 래피드 상위 ${approx}<b>${t.top}%</b><span class="tb">${tierBadge(t.tier,18)}<b>${esc(t.label)}</b></span><span class="dim">· ${nxt}</span></div>`;
+  return `<div class="tierrow" title="${src} 티어는 그 백분위를 롤 솔로 랭크 티어 비율에 맞춰 환산한 것입니다.">체스닷컴 래피드 상위 ${approx}<b>${t.top}%</b><span class="tg"><span class="tb">${tierBadge(t.tier,18)}<b>${esc(t.label)}</b></span><span class="dim">· ${nxt}</span></span></div>`;
 }
 /* 오늘·지금 세션의 판 수: 30분 이상 비면 새 세션 (파이프라인 SESSION_GAP 과 같다) */
 const SESSION_GAP=1800;
@@ -175,7 +179,7 @@ function sessionLine(S){
   const log=S.log||[]; if(!log.length) return '';
   const now=Date.now()/1000, last=log[log.length-1];
   let n=1; for(let i=log.length-1;i>0&&log[i].t-log[i-1].t<=SESSION_GAP;i--) n++;
-  const today=new Date(Date.now()+9*3600*1000).toISOString().slice(0,10), nt=log.filter(g=>g.d===today).length;
+  const today=kstDay(), nt=log.filter(g=>g.d===today).length;
   const live=now-last.t<=SESSION_GAP;
   const sp=((S.tilt||{}).session_pos||[]).find(r=>r.label==='6판째 이후');
   const warn=live&&n>=5?`<span class="chip serious">${sp&&sp.score!=null?`6판째부터 승률 ${sp.score}%`:'쉬어 갈 때'}</span>`:'';
@@ -204,7 +208,7 @@ function lastGameCard(S){
 /* 홈의 '오늘' 한 줄: 교본 1장 · 오늘의 퍼즐 · 오프닝 1라인. 완료 여부는 각 페이지가 기기에 남긴 기록에서 읽는다 */
 function routineLine(){
   const ls=(k)=>{ try{ return JSON.parse(localStorage.getItem(k)||'null'); }catch(e){ return null; } };
-  const day=new Date(Date.now()+9*3600*1000).toISOString().slice(0,10);
+  const day=kstDay();
   const pd=ls('puzzle-day'), on=pd&&pd.date===day&&Array.isArray(pd.ids), pt=on?pd.daily:10, pn=on?pd.ids.slice(0,pd.daily).filter(id=>(pd.res||{})[id]).length:0;
   const pw=ls('puzzle-win'), wn=pw&&pw.date===day?pw.n:0, WIN_N=3;    // 굳히기 퍼즐: 유리하던 국면만 모은 묶음 (puzzle.html?cat=win)
   const items=[['교본',Object.values(ls('learn-done')||{}).includes(day),'learn.html?next=1'],
@@ -227,7 +231,7 @@ const ruleState=()=>{ try{ const r=JSON.parse(localStorage.getItem(RULE_K)||'nul
 const ruleHits=(rule,g)=>rule.win?(g.w||0):rule.cats.reduce((a,k)=>a+((g.c||{})[k]||0),0);
 function setRule(id){
   const S=DATA.windows[W], log=(S&&S.log)||[], last=log.length?log[log.length-1].t:0;
-  const r={id,since:last,set:new Date(Date.now()+9*3600*1000).toISOString().slice(0,10)};
+  const r={id,since:last,set:kstDay()};
   try{ localStorage.setItem(RULE_K,JSON.stringify(r)); }catch(e){}
   const el=document.getElementById('s-rule'); if(el) el.outerHTML=ruleSection(S);
 }
@@ -340,7 +344,6 @@ document.addEventListener('click',(e)=>{
 });
 
 /* ---------- 오프닝 성적표: 내가 고른 수순 / 상대가 고른 수순 (stats.json 의 repertoire) ---------- */
-const VERD={weak:['취약','critical'],weak_hint:['취약 조짐','serious'],strong:['강점','good'],strong_hint:['강점 조짐','good'],even:['평균 수준','']};
 const verdChip=(r)=>{ const v=VERD[r.verdict]; return v&&r.verdict!=='even'?`<span class="chip ${v[1]}">${v[0]}</span>`:''; };
 const repOf=(S,id)=>{ const [c,i]=id.split('|'); const R=(S.repertoire||{})[c]; return R&&R.rows&&R.rows[+i]; };
 function repRow(r,id,pre){
@@ -384,7 +387,6 @@ document.addEventListener('click',(e)=>{
   document.querySelectorAll('#repc button').forEach(x=>x.classList.toggle('on',x.dataset.c===REPC));
   document.querySelectorAll('[data-repc]').forEach(x=>{ x.hidden=x.dataset.repc!==REPC; });
 });
-const cpTxt=(v)=>v==null?'-':(v>0?'+':v<0?'−':'')+(Math.abs(v)/100).toFixed(1);
 function repView(r,c){
   const B=DATA.windows[W].repertoire[c].base, m=r.mist, color=c==='w'?'백':'흑', weak=r.verdict.startsWith('weak'), strong=r.verdict.startsWith('strong');
   const v=VERD[r.verdict]||VERD.even, cls=weak?(r.verdict==='weak'?'worse':'maybe_worse'):strong?'better':'';
@@ -445,7 +447,8 @@ function endgameCard(eg){
   return h+`</table><div class="method">종류는 엔드게임에 들어간 순간(폰과 킹을 뺀 기물 가치 합이 14 이하가 된 첫 수)의 양쪽 기물 구성입니다. 폰 엔딩은 킹과 폰만, 마이너는 나이트·비숍만, 룩 엔딩은 룩만, 룩과 마이너는 룩에 나이트·비숍이 섞인 것, 퀸 엔딩은 퀸만, 퀸과 다른 기물은 퀸에 룩이나 마이너가 더 있는 것입니다. 한쪽에만 있어도 셉니다. "앞선·뒤진"은 들어갈 때 기물 가치가 1폰 넘게 차이 난 판입니다.</div></div>`;
 }
 /* 승부가 끝난 방식: 승리·패배·무승부마다 메이트/기권/시간… 비율 막대 */
-const HOW={checkmated:'메이트',resigned:'기권',timeout:'시간',abandoned:'포기',agreed:'합의',repetition:'반복',stalemate:'스테일메이트',insufficient:'기물 부족',timevsinsufficient:'시간 대 기물 부족','50move':'50수 규칙',win:'승'};
+/* HOW(끝난 방식 이름)는 shared.js 에 있다 */
+/* 끝난 방식 이름 HOW 는 shared.js */
 /* 탁월한 수 목록: 최근 것부터, 장면 보기로 '잡으면' 수순과 최선 응수를 본다 */
 function brillRow(w,wid){
   return `<div class="game"><div class="m"><div class="h"><b><span class="cls brill">탁월</span> <span class="mono">${mv(w)}</span></b><span class="s">${w.date}</span></div>
@@ -499,7 +502,8 @@ function render(){
   document.body.dataset.w=W;
   document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.w===W));
   $('#title').textContent = `${DATA.username} · 래피드 분석`;
-  $('#foot').innerHTML = `마지막 갱신 ${DATA.generated} (KST) · Stockfish 19 depth ${(DATA.meta||{}).depth||14}, 수순 depth ${(DATA.meta||{}).pv_depth||16} · 게임이 끝나면 1~2분 안에 자동 갱신<br>기물: maestro (sadsnake1, CC BY-NC-SA 4.0), cburnett (GPLv2+), merida (GPLv2+), alpha (Eric Bentzen), california (Jerry S., CC BY-NC-SA 4.0)`;
+  $('#foot').innerHTML = `마지막 갱신 ${DATA.generated} (KST${ageTxt(DATA.generated)}) · Stockfish 19 depth ${(DATA.meta||{}).depth||14}, 수순 depth ${(DATA.meta||{}).pv_depth||16} · 게임이 끝나면 1~2분 안에 자동 갱신<br>기물: maestro (sadsnake1, CC BY-NC-SA 4.0), cburnett (GPLv2+), merida (GPLv2+), alpha (Eric Bentzen), california (Jerry S., CC BY-NC-SA 4.0)`;
+  if(S===undefined){ $('#subtitle').textContent=''; $('#main').innerHTML=`<div class="empty">이 기간의 통계를 불러오지 못했습니다. <a href="" onclick="location.reload();return false">다시 시도</a></div>`; return; }
   if(!S){ $('#subtitle').textContent=''; $('#main').innerHTML='<div class="empty">이 기간에 분석된 래피드 게임이 없습니다.</div>'; return; }
   const o=S.overview, t=S.time, c=S.conversion, tc=S.tactics;
   // 상단 한 줄: 색별 승률(승 + 무/2)과 무승부 비율. 길게 누르면 승·무·패 수
@@ -536,8 +540,7 @@ function render(){
   h+=`<section id="s-recent" data-view="games"><h2>최근 게임<small>회색 태그는 실수 유형(파란 테두리는 집중 과제) · 초록 체크는 잘한 점</small></h2><div class="card">`;
   S.recent.forEach((g,gi)=>{
     if(gi===RECENT_N) h+=`<div class="fold" id="fold-recent" hidden>`;
-    const how={checkmated:'메이트',resigned:'기권',timeout:'시간',abandoned:'포기',agreed:'합의',repetition:'반복',stalemate:'스테일',insufficient:'기물부족'};
-    const endby=g.outcome==='W'?how[g.opp_result]:how[g.my_result];
+    const endby=g.outcome==='W'?HOW[g.opp_result]:HOW[g.my_result];
     const w=g.worst; const wid=`rw${gi}`; const worstPly=w?plyOf(w)-1:null;
     h+=`<div class="game"><a class="grow" href="${gameLink(g.url)}"><div class="res ${g.outcome}">${g.outcome==='W'?'승':g.outcome==='L'?'패':'무'}</div><div class="m">
       <div class="h"><b>${g.color==='w'?'백':'흑'} vs ${esc(g.opp)} <span class="elo">${g.opp_elo}</span></b><span class="s dt">${g.date.slice(5)} ›</span></div>
@@ -606,7 +609,7 @@ function render(){
     <div class="tile"><div class="k">기물 방치 (한 수에 잡히는 기물)</div><div class="v">${tc.hung_total}</div><div class="d">판당 ${tc.hung_pg} · ${hungRows.map(([k,v])=>`${k} ${v}`).join(' · ')||'-'}<br>시간 1분 이상 남았을 때 ${tc.hung_with_time}회</div></div>
     <div class="tile"><div class="k">공짜 기물 안 잡음</div><div class="v">${tc.missed_free}</div><div class="d">잡는 수가 최선(+2 이상)인데 다른 수</div></div>
     <div class="tile"><div class="k">외통 놓침</div><div class="v">${tc.missed_mate_total}</div><div class="d">${Object.entries(tc.missed_mate).map(([k,v])=>`${k}${k==='5'?'+':''}수 외통 ${v}`).join(' · ')||'-'}</div></div>
-    <div class="tile"><div class="k">탁월한 수 <span class="cls brill" style="font-size:10px;padding:1px 6px">!!</span></div><div class="v" style="color:var(--c-brill)">${br.n}</div><div class="d">${br.games}판에서 · 상대 ${br.opp}개<br>${br.n?`${Math.round(1/br.pg)}판에 하나꼴`:'아직 없음'}</div></div>
+    <div class="tile"><div class="k">탁월한 수 <span class="cls brill" style="font-size:10px;padding:1px 6px">!!</span></div><div class="v" style="color:var(--c-brill)">${br.n}</div><div class="d">${br.games}판에서 · 상대 ${br.opp}개<br>${br.n?`${Math.round(o.games/br.n)}판에 하나꼴`:'아직 없음'}</div></div>
     <div class="tile"><div class="k">대단한 수 <span class="cls great" style="font-size:10px;padding:1px 6px">!</span></div><div class="v" style="color:var(--c-great)">${gr.n}</div><div class="d">상대 대실수를 조용한 수로 응징 · 판당 ${gr.pg} · 상대 ${gr.opp}개<br>장면은 게임 페이지에서</div></div>
   </div>${brillCard(br)}</section>`;
   if(S.vs_rating){
@@ -635,13 +638,22 @@ document.addEventListener('click',(e)=>{
 /* 최근 30일·7일 통계는 stats-30d.json / stats-7d.json 에 따로 있어 탭을 누를 때 받는다 (첫 화면은 전체 기간만) */
 async function loadWindow(w){
   if(w in DATA.windows) return;
-  try{ const r=await fetch(`stats-${w}.json`,{cache:'no-cache'}); DATA.windows[w]=r.ok?(await r.json()).window:null; }
-  catch(e){ DATA.windows[w]=null; }
+  try{ const r=await fetch(`stats-${w}.json`,{cache:'no-cache'}); if(r.ok) DATA.windows[w]=(await r.json()).window; else if(r.status===404) DATA.windows[w]=null; }
+  catch(e){}   // 못 받으면 undefined 로 남겨 render 가 '없음'이 아니라 '불러오지 못함'을 보인다
 }
-document.querySelectorAll('#tabs button').forEach(b=>b.addEventListener('click',async()=>{closeSheet();W=b.dataset.w;try{localStorage.setItem('chess-window',W)}catch(e){}; b.classList.add('on'); await loadWindow(W); render();window.scrollTo(0,0)}));
+document.querySelectorAll('#tabs button').forEach(b=>b.addEventListener('click',async()=>{closeSheet();const w=b.dataset.w;W=w;try{localStorage.setItem('chess-window',W)}catch(e){}; b.classList.add('on'); await loadWindow(w); if(W!==w) return; render();window.scrollTo(0,0)}));
 try{const s=localStorage.getItem('chess-window'); if(s&&WNAME[s]) W=s;}catch(e){}
 const Q=new URLSearchParams(location.search);
 if(Q.get('w')&&WNAME[Q.get('w')]) W=Q.get('w');
 await loadWindow(W); render();
 { if(Q.get('weak')!=null) openSheet(+Q.get('weak'));
-  if(Q.get('cat')&&catData(DATA.windows[W],Q.get('cat'))){ VIEW='mistakes'; setSub('mistakes','cats'); showCat(Q.get('cat'),true); } }
+  if(Q.get('cat')&&catData(DATA.windows[W],Q.get('cat'))){ VIEW='mistakes'; setSub('mistakes','cats'); showCat(Q.get('cat'),true); }
+  // 쿼리는 한 번 쓰고 지운다. 남겨 두면 탭바의 index.html#… 링크가 같은 문서가 아니어서 탭을 누를 때마다 전부 다시 받는다
+  if(location.search) history.replaceState(null,'',location.pathname+location.hash); }
+/* 폰을 켜 둔 채 한 판 두고 돌아오면 새 분석을 자동으로 받는다 (5분 넘게 지난 뒤 화면이 다시 보일 때) */
+document.addEventListener('visibilitychange',async()=>{
+  if(document.visibilityState!=='visible'||Date.now()-LAST_FETCH<5*60e3) return;
+  LAST_FETCH=Date.now();
+  try{ const d=await getJSON('stats.json'); if(d.generated===DATA.generated) return;
+    DATA=d; await loadWindow(W); closeSheet(); render(); }catch(e){}
+});

@@ -12,7 +12,7 @@
 import argparse, base64, hashlib, json, os, sys, time, urllib.error, urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-GENERATED = ("data/chess.db", "docs/stats.json", "docs/puzzles.json", "docs/coach.json", "docs/book.json", "docs/pieces.svg", "docs/.code-hash", "docs/.nojekyll", "docs/games/")
+GENERATED = ("data/chess.db", "docs/stats.json", "docs/stats-30d.json", "docs/stats-7d.json", "docs/puzzles.json", "docs/coach.json", "docs/book.json", "docs/pieces.svg", "docs/.code-hash", "docs/.nojekyll", "docs/games/")
 
 
 def env():
@@ -81,6 +81,9 @@ def main():
     if not a.message or not (a.files or a.delete):
         ap.error("-m 메시지와 올릴 파일(또는 --delete)이 필요합니다")
     files = [os.path.relpath(os.path.abspath(f), ROOT) for f in a.files]
+    secret = [f for f in files if os.path.basename(f).startswith(".env") or f.startswith(("venv/", "engine/", "data/notify_queue", "data/pct_tried"))]
+    if secret:
+        sys.exit("비밀/로컬 파일은 올리지 않습니다: " + ", ".join(secret))
     blocked = [f for f in files if f.startswith(GENERATED)]
     if blocked and not a.force_data:
         sys.exit("감시 루프가 만드는 파일은 올리지 않습니다 (--force-data 로 강제): " + ", ".join(blocked))

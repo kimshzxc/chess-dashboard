@@ -5,3 +5,5 @@ __pycache__/
 data/*.json
 data/pipeline.lock
 *.log
+data/pct_tried
+docs/*.tmp

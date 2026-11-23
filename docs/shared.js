@@ -1,5 +1,25 @@
 const $ = (s)=>document.querySelector(s);
-const esc = (s)=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const esc = (s)=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+/* ---------- 페이지 공용 작은 도우미 (각 페이지에 따로 있던 것을 모음) ---------- */
+const DAY_MS=864e5;
+const kstDay=(off=0)=>new Date(Date.now()+9*3600*1000+off*DAY_MS).toISOString().slice(0,10);   // KST 날짜 (off 일 뒤)
+const today=()=>kstDay(0);
+const load=(k,d)=>{ try{ const v=JSON.parse(localStorage.getItem(k)||'null'); return v??d; }catch(e){ return d; } };
+const save=(k,v)=>{ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} };
+const VERD={weak:['취약','critical'],weak_hint:['취약 조짐','serious'],strong:['강점','good'],strong_hint:['강점 조짐','good'],even:['평균 수준','']};
+const cpTxt=(v)=>v==null?'-':Math.abs(v)>=9000?(v>0?'외통 승':'외통 패'):(v>0?'+':v<0?'−':'')+(Math.abs(v)/100).toFixed(1);
+const HOW={checkmated:'메이트',resigned:'기권',timeout:'시간',abandoned:'포기',agreed:'합의',repetition:'반복',stalemate:'스테일메이트',insufficient:'기물 부족',timevsinsufficient:'시간 대 기물 부족','50move':'50수'};
+/* 판 SVG 위의 포인터 좌표 → 칸 이름. flip 이면 흑이 아래 */
+function squareAt(svg,e,flip){
+  const r=svg.getBoundingClientRect(); let fx=Math.floor((e.clientX-r.left)/r.width*8), ry=Math.floor((e.clientY-r.top)/r.height*8);
+  if(fx<0||fx>7||ry<0||ry>7) return null; if(flip){ fx=7-fx; ry=7-ry; }
+  return FILES[fx]+(8-ry);
+}
+/* 페이지의 데이터를 못 받았을 때 (첫 방문에 오프라인, 배포 중 404): 빈 화면 대신 안내와 다시 시도 */
+function loadError(e){
+  const m=document.querySelector('#main'); if(!m) return;
+  m.innerHTML=`<div class="empty">데이터를 불러오지 못했습니다${e&&e.message?` (${esc(e.message)})`:''}.<br>네트워크를 확인하고 <a href="" onclick="location.reload();return false">다시 시도</a>하세요.</div>`;
+}
 const clk = (s)=> s==null?'-':`${Math.floor(Math.round(s)/60)}:${String(Math.round(s)%60).padStart(2,'0')}`;
 const ev = (cp)=> cp==null?'-':Math.abs(cp)>=9000 ? (cp>0?'#승':'#패') : ((cp>0?'+':'')+(cp/100).toFixed(1));
 const evW = (cp)=> cp==null?'-':Math.abs(cp)>=9000 ? ('M'+Math.round((10000-Math.abs(cp))/10)) : ((cp>0?'+':'')+(cp/100).toFixed(1));
@@ -92,7 +112,7 @@ function applyTheme(){
   const b=BOARDS[THEME.board]; const r=document.documentElement.style;
   r.setProperty('--sq-l',b.l); r.setProperty('--sq-d',b.d); r.setProperty('--sq-hl',b.hl);
   document.documentElement.dataset.tex = b.tex?'1':'0';
-  document.querySelectorAll('svg.board use').forEach(u=>{ const id=u.getAttribute('href').split('-').pop(); u.setAttribute('href',`#${THEME.pieces}-${id}`); });
+  document.querySelectorAll('svg.board use:not(.grain)').forEach(u=>{ const id=u.getAttribute('href').split('-').pop(); u.setAttribute('href',`#${THEME.pieces}-${id}`); });   // 나무결(.grain)의 href 는 기물이 아니다
   document.querySelectorAll('.sw[data-board]').forEach(x=>x.classList.toggle('on',x.dataset.board===THEME.board));
   document.querySelectorAll('.sw[data-pieces]').forEach(x=>x.classList.toggle('on',x.dataset.pieces===THEME.pieces));
   document.querySelectorAll('.sw[data-mode]').forEach(x=>x.classList.toggle('on',x.dataset.mode===MODE));
@@ -116,7 +136,6 @@ const ICON={
   sliders:'<path d="M4 6h8M16 6h4M4 12h2M10 12h10M4 18h10M18 18h2"/><circle cx="14" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="16" cy="18" r="2"/>',
   back:'<path d="M15 5l-7 7 7 7"/>',
   arrow:'<path d="M5 19 19 5M9 5h10v10"/>',
-  try:'<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13 7l4 4"/>',
 };
 const icon=(n)=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${ICON[n]}</svg>`;
 /* 하단 탭바 (세 페이지 공용). body[data-tab] 이 현재 탭 */
@@ -126,7 +145,7 @@ function tabbar(){
   return `<nav class="tabbar" id="tabbar">`+items.map(([k,n,u])=>`<a href="${u}" data-tab="${k}" class="${k===cur?'on':''}">${icon(k)}${n}</a>`).join('')+`</nav>`;
 }
 document.body.insertAdjacentHTML('beforeend',tabbar());
-{ const fb=document.getElementById('optflip'); if(fb) fb.innerHTML=icon('flip'); const ab=document.getElementById('optbest'); if(ab) ab.innerHTML=icon('arrow'); const tb=document.getElementById('opttry'); if(tb) tb.innerHTML=icon('try'); }
+{ const fb=document.getElementById('optflip'); if(fb) fb.innerHTML=icon('flip'); const ab=document.getElementById('optbest'); if(ab) ab.innerHTML=icon('arrow'); }
 { const tb=document.getElementById('tbtn'); if(tb){ tb.innerHTML=icon('sliders'); tb.setAttribute('aria-label','테마'); tb.setAttribute('role','button'); tb.title='테마'; } }
 /* 연습 탭 머리: 퍼즐 / 오프닝 연습 전환 (puzzle.html, train.html 공용) */
 const practiceNav=(cur)=>`<div class="tabs seg"><a class="${cur==='puzzle'?'on':''}" href="puzzle.html">퍼즐</a><a class="${cur==='train'?'on':''}" href="train.html">오프닝</a><a class="${cur==='learn'?'on':''}" href="learn.html">교본</a></div>`;
@@ -186,7 +205,7 @@ document.addEventListener('click',(e)=>{
 });
 document.addEventListener('change',(e)=>{ const f=e.target.id==='prog-file'&&e.target.files&&e.target.files[0]; if(!f) return; f.text().then(progImport); e.target.value=''; });
 document.addEventListener('click',(e)=>{
-  const tb=e.target.closest('#tbtn'); if(tb){ const p=$('#tpanel'); p.classList.toggle('open'); if(p.classList.contains('open')) progNote(progressSummary(progressDump())); return; }   // 열 때마다 기록 요약을 새로 센다
+  const tb=e.target.closest('#tbtn'); if(tb){ const p=$('#tpanel'); if(!p) return; p.classList.toggle('open'); if(p.classList.contains('open')) progNote(progressSummary(progressDump())); return; }   // 열 때마다 기록 요약을 새로 센다
   const t=e.target.closest('.sw'); if(!t||/^prog-/.test(t.id||'')||t.htmlFor) return;
   if(t.dataset.mode){ MODE=t.dataset.mode; applyMode(); return; }
   if(t.dataset.board) THEME.board=t.dataset.board; if(t.dataset.pieces) THEME.pieces=t.dataset.pieces; THEME.v=2; applyTheme();

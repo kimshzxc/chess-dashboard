@@ -147,7 +147,7 @@ class WithDb(unittest.TestCase):
 
     def add_lines(self, **over):
         for fen, san, best in pipeline.lines_todo(self.con):
-            self.con.execute("INSERT OR REPLACE INTO lines(fen,played,best,data) VALUES(?,?,?,?)", (fen, san, best, json.dumps(dict(LINE, **over))))
+            self.con.execute("INSERT OR REPLACE INTO lines(fen,played,best,data,depth) VALUES(?,?,?,?,?)", (fen, san, best, json.dumps(dict(LINE, **over)), pipeline.LINE_DEPTH))
         self.con.commit()
 
     def test_stats_end_to_end(self):
@@ -490,8 +490,10 @@ class WithDb(unittest.TestCase):
         self.assertEqual(got["best_line"], [])                        # 첫 수(c4)가 최선(d4)과 달라 숨김
         self.assertEqual(len(got["refutation"]), 1)
         self.assertEqual(len(pipeline.cached_lines(self.con, START, "e4", "c4")["best_line"]), 1)
-        self.con.execute("INSERT INTO lines VALUES(?,?,?,?)", (START, "e4", "d4", json.dumps(LINE)))
+        self.con.execute("INSERT INTO lines(fen,played,best,data,depth) VALUES(?,?,?,?,?)", (START, "e4", "d4", json.dumps(LINE), pipeline.LINE_DEPTH))
         self.assertEqual(pipeline.cached_lines(self.con, START, "e4", "d4")["best_line"][0]["san"], "d4")
+        self.con.execute("UPDATE lines SET depth=? WHERE fen=? AND played=? AND best=?", (pipeline.LINE_DEPTH - 2, START, "e4", "d4"))
+        self.assertIn((START, "e4", "d4"), pipeline.lines_todo(self.con))                 # 깊이가 다른 수순은 다시 계산 대상
 
     def test_lessons_build(self):
         """교본 원고의 수순이 전부 둘 수 있고, 유형·오프닝 키가 실제 키이며, 올라간 lessons.json 이 원고와 같다."""
@@ -526,6 +528,13 @@ class WithDb(unittest.TestCase):
         with open(os.path.join(ROOT, "docs", "lessons.json"), encoding="utf-8") as f:
             self.assertEqual(json.load(f), json.loads(json.dumps(data)), "lessons/build.py 를 다시 실행하세요")
 
+    def test_generated_lists_cover_outputs(self):
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools"))
+        import gh_push, gh_pull
+        for name in ("stats.json", "stats-30d.json", "stats-7d.json", "puzzles.json", "coach.json", "book.json", "pieces.svg", ".code-hash"):
+            self.assertTrue(("docs/" + name).startswith(gh_push.GENERATED), name)
+            self.assertTrue(("docs/" + name).startswith(gh_pull.GENERATED), name)
+
     def test_reanalysis_queue(self):
         self.con.execute("UPDATE games SET depth=14 WHERE url LIKE '%1000'")
         redo = self.con.execute("SELECT COUNT(*) FROM games WHERE analyzed=1 AND (depth IS NULL OR depth!=?)", (pipeline.DEPTH,)).fetchone()[0]
@@ -535,17 +544,26 @@ class WithDb(unittest.TestCase):
         calls = []
         orig = (pipeline.wait_for_page, pipeline.notify)
         pipeline.wait_for_page = lambda url, timeout=150, every=5: calls.append(("wait", url)) or True
-        pipeline.notify = lambda cfg, game, summary, base, con=None: calls.append(("notify", game["url"]))
+        ok = [True]
+        pipeline.notify = lambda cfg, game, summary, base, con=None: calls.append(("notify", game["url"])) or ok[0]
         try:
             url = "https://www.chess.com/game/live/1003"
             pipeline.queue_save([url, "https://www.chess.com/game/live/does-not-exist"])
             self.assertTrue(os.path.exists(pipeline.queue_path()))
             sent = pipeline.send_queued(self.con, dict(GITHUB_OWNER="o", GITHUB_REPO="r"))
+            self.assertEqual(sent, 1)
+            self.assertEqual(calls, [("wait", "https://o.github.io/r/games/1003.json"), ("notify", url)])   # 배포 확인이 알림보다 먼저
+            self.assertFalse(os.path.exists(pipeline.queue_path()))
+            # ntfy 실패: 대기열에 남아 다음에 다시 보내고, NOTIFY_TRIES 번 실패하면 버린다
+            ok[0] = False; calls.clear(); pipeline.queue_save([url])
+            for i in range(1, pipeline.NOTIFY_TRIES):
+                self.assertEqual(pipeline.send_queued(self.con, dict(GITHUB_OWNER="o", GITHUB_REPO="r")), 0)
+                self.assertEqual((pipeline.queue_load(), pipeline.queue_tries()[url]), ([url], i))
+            self.assertEqual(pipeline.send_queued(self.con, dict(GITHUB_OWNER="o", GITHUB_REPO="r")), 0)
+            self.assertFalse(os.path.exists(pipeline.queue_path()))
+            self.assertEqual(len([c for c in calls if c[0] == "notify"]), pipeline.NOTIFY_TRIES)
         finally:
             pipeline.wait_for_page, pipeline.notify = orig
-        self.assertEqual(sent, 1)
-        self.assertEqual(calls, [("wait", "https://o.github.io/r/games/1003.json"), ("notify", url)])   # 배포 확인이 알림보다 먼저
-        self.assertFalse(os.path.exists(pipeline.queue_path()))
         self.assertEqual(pipeline.queue_load(), [])
 
     def test_weekly(self):

@@ -1,7 +1,7 @@
 /* 오프닝 연습: train.html?o=<오프닝 id>[&l=<라인 번호>]. shared.js 다음에 module 로 로드된다.
    book.json 의 라인(내 15수째까지)을 직접 두어 본다. 내 수는 판에서 기물과 칸을 눌러 두고, 상대 수는 자동으로 놓인다.
    train-done (localStorage)  {오프닝 id: {라인 번호: {clean: 실수 없이 끝낸 횟수, n: 끝낸 횟수, last: 날짜}}} */
-document.body.insertAdjacentHTML('afterbegin', await fetch('pieces.svg').then(r=>r.text()));
+try{ document.body.insertAdjacentHTML('afterbegin', await fetch('pieces.svg').then(r=>{ if(!r.ok) throw new Error(`pieces.svg ${r.status}`); return r.text(); })); }catch(e){ loadError(e); throw e; }
 const BOOK = await fetch('book.json',{cache:'no-cache'}).then(r=>r.ok?r.json():null).catch(()=>null);
 $('#tpanel-slot').innerHTML=themePanel(); applyMode(); $('#pnav').innerHTML=practiceNav('train');
 const Q=new URLSearchParams(location.search);
@@ -13,16 +13,11 @@ function nextUp(){
   for(const o of Object.values(OPS).sort((a,b)=>rank(a)-rank(b)||b.n-a.n)){ const i=o.lines.findIndex((_,i)=>!((D[o.id]||{})[i]||{}).clean); if(i>=0) return [o,i]; }
   return null;
 }
-const load=(k,d)=>{ try{ const v=JSON.parse(localStorage.getItem(k)||'null'); return v??d; }catch(e){ return d; } };
 const NX=Q.get('next')?nextUp():null;
 const O=NX?NX[0]:OPS[Q.get('o')];
-const VERD={weak:['취약','critical'],weak_hint:['취약 조짐','serious'],strong:['강점','good'],strong_hint:['강점 조짐','good'],even:['평균 수준','']};
-const save=(k,v)=>{ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} };
 const DONE=load('train-done',{});
-const today=()=>new Date(Date.now()+9*3600*1000).toISOString().slice(0,10);
 const START='rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 const num=(p,first)=>p.mover==='w'?`${p.move}.`:(first?`${p.move}…`:'');
-const cpTxt=(v)=>v==null?'-':Math.abs(v)>=9000?(v>0?'외통 승':'외통 패'):(v>0?'+':v<0?'−':'')+(Math.abs(v)/100).toFixed(1);
 
 /* ---------- 목록 (o 가 없거나 모르는 id) ---------- */
 function listHTML(){
@@ -36,10 +31,12 @@ function listHTML(){
 
 /* ---------- 연습 ---------- */
 let LI=NX?NX[1]:Math.max(0,Math.min(O?O.lines.length-1:0,+(Q.get('l')||0)||0));
+let GEN=0;     // 라인을 다시 시작할 때마다 1씩. 지난 시도의 setTimeout 이 새 ST 를 건드리지 않게 한다
 let ST=null;   // {i: 다음에 둘 수의 순번, wrong: 이 수에서 틀린 횟수, miss: 이 라인에서 틀린 수의 개수, shown: 정답을 본 수, msg, sel, busy, done}
 const line=()=>O.lines[LI];
 const fenAt=(i)=>i>0?line().plies[i-1].fen:START;
-function reset(){ ST={i:0,wrong:0,miss:0,shown:0,msg:'',cls:'',sel:null,busy:false,done:false,arrows:[],wcp:null}; autoOpp(true); }
+function reset(){ ST={gen:++GEN,i:0,wrong:0,miss:0,shown:0,msg:'',cls:'',sel:null,busy:false,done:false,arrows:[],wcp:null}; autoOpp(true); }
+const alive=(gen)=>ST&&ST.gen===gen;
 /* i수가 놓인 국면의 평가(내 기준). 내 수의 cp 는 그 수를 둔 뒤의 값이고 상대 수에는 없으므로, 상대가 둔 뒤에는 다음 내 수의 값을 쓴다 */
 function stateCp(i){
   const P=line().plies; if(i>0&&P[i-1].mine&&P[i-1].cp!=null) return P[i-1].cp;
@@ -51,8 +48,8 @@ function autoOpp(instant){
   const P=line().plies;
   if(ST.i>=P.length){ finish(); return; }
   if(P[ST.i].mine){ render(); return; }
-  ST.busy=true; render();
-  setTimeout(()=>{ if(!ST) return; ST.i++; ST.busy=false; ST.arrows=[]; autoOpp(false); }, instant?350:550);
+  ST.busy=true; render(); const gen=ST.gen;
+  setTimeout(()=>{ if(!alive(gen)) return; ST.i++; ST.busy=false; ST.arrows=[]; autoOpp(false); }, instant?350:550);
 }
 function finish(){
   ST.done=true;
@@ -98,11 +95,6 @@ function render(){
   setEvalBar($('#teval'), toW(ST.wcp!=null?ST.wcp:stateCp(ST.i)), flip);
   applyTheme();
 }
-function squareAt(svg,e){
-  const r=svg.getBoundingClientRect(); let fx=Math.floor((e.clientX-r.left)/r.width*8), ry=Math.floor((e.clientY-r.top)/r.height*8);
-  if(fx<0||fx>7||ry<0||ry>7) return null; if(O.color==='b'){ fx=7-fx; ry=7-ry; }
-  return FILES[fx]+(8-ry);
-}
 const mineAt=(sq)=>{ const x=parseFen(fenAt(ST.i)).find(q=>q.sq===sq); return x&&x.p[0]===O.color; };
 function play(uci){
   const p=line().plies[ST.i], u=uci.slice(0,4);
@@ -117,17 +109,17 @@ function play(uci){
   ST.msg=`<span class="ic">다시</span>${usual?`평소 두던 수입니다 (${p.bad.n}번, 평균 −${p.bad.loss}%p). 여기가 고칠 자리입니다.`:'이 라인의 수가 아닙니다.'} ${ST.wrong>=2?'움직일 기물을 표시했습니다.':'다시 찾아보세요.'}${ST.wcp!=null?` <span class="sub">이 수를 두면</span> ${wpChange(p.cp,ST.wcp)}`:''}`;
   ST.arrows=[]; if(ST.wrong>=2) ST.sel=p.uci.slice(0,2);
   render();
-  setTimeout(()=>{ if(ST&&ST.cls==='ng'){ ST.cls=''; const b=$('#tboard'); if(b) b.classList.remove('ng'); } },400);
+  { const gen=ST.gen; setTimeout(()=>{ if(alive(gen)&&ST.cls==='ng'){ ST.cls=''; const b=$('#tboard'); if(b) b.classList.remove('ng'); } },400); }
 }
 function advance(msg){
   ST.i++; ST.wrong=0; ST.sel=null; ST.cls='ok'; ST.msg=msg; ST.arrows=[]; ST.wcp=null;
   if(ST.i>=line().plies.length){ finish(); return; }
-  ST.busy=true; render();
-  setTimeout(()=>{ if(!ST) return; ST.cls=''; ST.msg=''; ST.busy=false; autoOpp(false); },650);
+  ST.busy=true; render(); const gen=ST.gen;
+  setTimeout(()=>{ if(!alive(gen)) return; ST.cls=''; ST.msg=''; ST.busy=false; autoOpp(false); },650);
 }
 document.addEventListener('pointerdown',(e)=>{
   const svg=e.target.closest('#tboard svg.board'); if(!svg||!O||!ST||ST.done||ST.busy) return;
-  const sq=squareAt(svg,e); if(!sq) return;
+  const sq=squareAt(svg,e,O.color==='b'); if(!sq) return;
   if(ST.sel&&sq!==ST.sel&&!mineAt(sq)){ const u=ST.sel+sq; play(u); return; }
   if(ST.sel&&sq!==ST.sel&&mineAt(sq)){   // 캐슬링을 킹→룩으로 누르는 경우도 받는다
     const p=line().plies[ST.i]; if(/^O-O/.test(p.san)&&ST.sel===p.uci.slice(0,2)){ play(p.uci); return; }

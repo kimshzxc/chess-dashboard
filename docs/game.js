@@ -1,6 +1,6 @@
 /* 게임 상세 페이지. shared.js, engine.js 다음에 module 로 로드된다. */
 import {Chess} from './vendor/chess.js';
-document.body.insertAdjacentHTML('afterbegin', await fetch('pieces.svg').then(r=>r.text()));
+try{ document.body.insertAdjacentHTML('afterbegin', await fetch('pieces.svg').then(r=>{ if(!r.ok) throw new Error(`pieces.svg ${r.status}`); return r.text(); })); }catch(e){ loadError(e); throw e; }
 $('#tpanel-slot').innerHTML=themePanel(); applyMode();
 $('#backbtn').innerHTML=icon('back')+'게임';
 const params=new URLSearchParams(location.search);
@@ -15,7 +15,6 @@ let VAR=[], VSEL=null, VRES=null, VTHINK=false, VERR=null;   // 둬 보기는 �
 const curFen=()=>VAR.length?VAR[VAR.length-1].fen:G.fens[IDX];
 const sanOf=(fen,uci)=>{ try{ const ch=new Chess(fen); const m=ch.move({from:uci.slice(0,2),to:uci.slice(2,4),promotion:uci[4]||undefined}); return m?m.san:uci; }catch(e){ return uci; } };
 const pvSan=(fen,pv)=>{ const ch=new Chess(fen), out=[]; for(const u of pv){ try{ const m=ch.move({from:u.slice(0,2),to:u.slice(2,4),promotion:u[4]||undefined}); if(!m) break; out.push(m.san); }catch(e){ break; } } return out.join(' '); };
-function squareAt(svg,e){ const r=svg.getBoundingClientRect(); let fx=Math.floor((e.clientX-r.left)/r.width*8), ry=Math.floor((e.clientY-r.top)/r.height*8); if(fx<0||fx>7||ry<0||ry>7) return null; if(FLIP){ fx=7-fx; ry=7-ry; } return FILES[fx]+(8-ry); }
 function tryMove(from,to){
   const ch=new Chess(curFen()); let m=null;
   try{ m=ch.move({from,to,promotion:'q'}); }catch(e){ m=null; }   // 승격은 퀸으로
@@ -228,7 +227,7 @@ function draw(){
 function go(i){ IDX=Math.max(0,Math.min(G.plies.length,i)); clearVar(); draw(); }
 document.addEventListener('click',(e)=>{   // 손을 뗄 때 처리한다: 누르는 순간 판을 다시 그리면 스와이프의 터치 끝 이벤트가 사라진다
   if(!G) return; const svg=e.target.closest('#board svg.board'); if(!svg) return;
-  const sq=squareAt(svg,e); if(!sq) return;
+  const sq=squareAt(svg,e,FLIP); if(!sq) return;
   if(VSEL&&sq!==VSEL&&tryMove(VSEL,sq)){ draw(); return; }
   const ch=new Chess(curFen()), pc=ch.get(sq);
   VSEL=(pc&&pc.color===ch.turn()&&VSEL!==sq)?sq:null;

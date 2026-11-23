@@ -15,13 +15,14 @@ self.addEventListener('fetch', (e) => {
   const key = url.origin + url.pathname;
   e.respondWith((async () => {
     const cache = await caches.open(CACHE);
+    const hit = await cache.match(key);
     const net = fetch(url.href, { cache: 'no-cache' }).then((res) => {
       // 리다이렉트를 거친 응답은 문서 탐색에 그대로 쓸 수 없어 새 응답으로 감싼다
       if (res.redirected) res = new Response(res.body, { status: res.status, statusText: res.statusText, headers: res.headers });
-      if (res.ok) cache.put(key, res.clone());
+      if (res.ok) e.waitUntil(cache.put(key, res.clone()));
+      else if (hit) return hit;   // 배포 중의 잠깐 404 같은 오류 응답보다 마지막으로 받은 것이 낫다
       return res;
     });
-    const hit = await cache.match(key);
     if (!hit) return net;
     return Promise.race([net, new Promise((r) => setTimeout(() => r(hit), 6000))]).catch(() => hit);
   })());

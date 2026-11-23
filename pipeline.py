@@ -40,6 +40,7 @@ BRILL_SAC = 2          # 탁월한 수: 정적 교환으로 상대가 이만큼(
 BRILL_WIN_BEFORE = 500 # 탁월한 수: 두기 전 평가가 이보다 높으면(이미 압도적) 치지 않는다
 BRILL_LOSE_AFTER = -100  # 탁월한 수: 둔 뒤 평가가 이보다 낮으면(지는 자리) 치지 않는다
 BRILL_V = "2"          # 탁월한 수 판정 규칙 버전. 바꾸면 다음 실행에서 모든 판을 다시 판정한다
+SUMMARY_V = "2"        # games.summary 계산 규칙 버전 (summarize). 바꾸면 모든 판의 요약을 plies 에서 다시 만든다 (엔진 없이 몇 초)
 GREAT_GAIN = 100       # 대단한 수: 상대 대실수 전보다 이만큼(cp) 이상 좋아진 것을 최선 수로 굳힌 수
 GREAT_HIDDEN = 150     # 대단한 수: 둔 뒤 평가가 기물 수보다 이만큼 높아야(이득이 아직 기물로 드러나지 않음 = 전술을 찾은 것) 한다
 # 체스닷컴 래피드 레이팅 분포(전체 계정 기준 추정): (레이팅, 그 아래 비율 %). 출처: chess.com 블로그 "What Percentage of Chess.com Players
@@ -108,11 +109,16 @@ def db():
         loss INTEGER, wp_loss REAL, clock REAL, spent REAL, capture INTEGER, chk INTEGER,
         piece INTEGER, phase TEXT, fen TEXT, PRIMARY KEY(url, ply));
     CREATE INDEX IF NOT EXISTS plies_url ON plies(url);
-    CREATE TABLE IF NOT EXISTS lines(fen TEXT, played TEXT, best TEXT, data TEXT, PRIMARY KEY(fen, played, best));
+    CREATE TABLE IF NOT EXISTS lines(fen TEXT, played TEXT, best TEXT, data TEXT, depth INTEGER, PRIMARY KEY(fen, played, best));
     CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT);
     CREATE TABLE IF NOT EXISTS book(fen TEXT PRIMARY KEY, depth INTEGER, data TEXT);
     CREATE TABLE IF NOT EXISTS moves(fen TEXT PRIMARY KEY, depth INTEGER, data TEXT);
     """)
+    lcols = {r[1] for r in con.execute("PRAGMA table_info(lines)")}
+    if "depth" not in lcols:   # 예전 행은 모두 LINE_DEPTH(18) 로 계산된 것
+        con.execute("ALTER TABLE lines ADD COLUMN depth INTEGER")
+        con.execute("UPDATE lines SET depth=?", (LINE_DEPTH,))
+        con.commit()
     pcols = {r[1] for r in con.execute("PRAGMA table_info(plies)")}
     if "brill" not in pcols:   # 1 = 탁월한 수 (기물을 내주고도 평가가 유지되는 수). tag_brilliant 가 채운다
         con.execute("ALTER TABLE plies ADD COLUMN brill INTEGER DEFAULT 0")
@@ -133,6 +139,14 @@ def db():
 # ---------------------------------------------------------------- fetch
 def has_table(con, name):
     return con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)).fetchone() is not None
+
+
+def dump_json(path, obj, compact=True):
+    """임시 파일에 다 쓴 뒤 바꿔 넣는다. 쓰다 죽어도 반쪽 JSON 이 남아 커밋되는 일이 없다."""
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(obj, f, ensure_ascii=False, separators=(",", ":") if compact else None)
+    os.replace(tmp, path)
 
 
 def meta_get(con, k):
@@ -237,6 +251,20 @@ def clk(comment):
     return int(m[1]) * 3600 + int(m[2]) * 60 + float(m[3]) if m else None
 
 
+def parse_tc(tc):
+    """체스닷컴 time_control ("600", "600+5", "900+10") → (기본 초, 증초). 모르면 10+0."""
+    try:
+        base, _, inc = str(tc or "600").partition("+")
+        return int(base), int(inc or 0)
+    except ValueError:
+        return 600, 0
+
+
+def missed_mate(p):
+    """강제 외통이 보였는데 둔 뒤 사라짐. 엔진 최선 수를 뒀는데 다음 탐색이 외통을 못 본 것(수평선 효과)은 놓친 게 아니다."""
+    return p["cp_before"] >= 9000 and p["cp_after"] < 9000 and not p.get("is_best")
+
+
 def cp_of(score, pov):
     s = score.pov(pov)
     if s.is_mate():
@@ -301,6 +329,7 @@ def endgame_stats(games):
 def analyze_game(args):
     url, pgn_text, my_color, sf = args[:4]
     threads = args[4] if len(args) > 4 else 1
+    base, inc = parse_tc(args[5] if len(args) > 5 else None)
     eng = chess.engine.SimpleEngine.popen_uci(sf)
     eng.configure({"Hash": 32 if threads == 1 else 128, "Threads": threads})
     try:
@@ -308,8 +337,8 @@ def analyze_game(args):
         board = game.board()
         my = chess.WHITE if my_color == "w" else chess.BLACK
         info = eng.analyse(board, chess.engine.Limit(depth=DEPTH))
-        prev_cp_w, prev_best = cp_of(info["score"], chess.WHITE), info.get("pv", [None])[0]
-        prev_clk = {chess.WHITE: 600.0, chess.BLACK: 600.0}
+        prev_cp_w, prev_best = cp_of(info["score"], chess.WHITE), (info.get("pv") or [None])[0]
+        prev_clk = {chess.WHITE: float(base), chess.BLACK: float(base)}
         plies, node = [], game
         while node.variations:
             nxt = node.variation(0)
@@ -328,21 +357,29 @@ def analyze_game(args):
                 cp_w, best_next = 0, None
             else:
                 info = eng.analyse(board, chess.engine.Limit(depth=DEPTH))
-                cp_w, best_next = cp_of(info["score"], chess.WHITE), info.get("pv", [None])[0]
+                cp_w, best_next = cp_of(info["score"], chess.WHITE), (info.get("pv") or [None])[0]
             before = prev_cp_w if mover == chess.WHITE else -prev_cp_w
             after = cp_w if mover == chess.WHITE else -cp_w
             c = clk(nxt.comment)
             spent = None
             if c is not None:
-                spent = round(prev_clk[mover] - c, 1)
+                spent = round(max(0.0, prev_clk[mover] + inc - c), 1)   # 증초는 둔 뒤에 더해지므로 쓴 시간 = 이전 + 증초 - 지금
                 prev_clk[mover] = c
             rec.update(cp_before=before, cp_after=after, loss=max(0, before - after),
                        wp_loss=round(max(0, winpct(before) - winpct(after)), 1), clock=c, spent=spent)
             plies.append(rec)
             prev_cp_w, prev_best, node = cp_w, best_next, nxt
         return url, tag_mistakes(tag_brilliant(plies))
+    except Exception as e:
+        log(f"  분석 오류 {url}: {e}")
+        return url, None
     finally:
         eng.quit()
+
+
+def _clk(c):
+    """시계 값이 없으면 '시간 충분'으로 본다. 0.0초(시간패 직전)는 그대로 0."""
+    return 999 if c is None else c
 
 
 def acc(wp_losses):
@@ -542,7 +579,7 @@ def mistake_cat(p, nxt):
         best = b.parse_san(p["best"]) if p.get("best") else None
     except Exception:
         best = None
-    if p["cp_before"] >= 9000 and p["cp_after"] < 9000:
+    if missed_mate(p):
         return "missed_mate"
     if p["cp_after"] <= -9000 and p["cp_before"] > -9000:
         return "allowed_mate"
@@ -703,6 +740,24 @@ def retag_brilliant(con):
     return n
 
 
+def resummarize(con):
+    """요약 규칙(SUMMARY_V)이 바뀌었으면 모든 판의 summary 를 plies 에서 다시 만든다. 다시 만든 판 수."""
+    if meta_get(con, "summary_v") == SUMMARY_V:
+        return 0
+    n = 0
+    for g in con.execute("SELECT url FROM games WHERE analyzed=1").fetchall():
+        plies = [dict(r) for r in con.execute("SELECT * FROM plies WHERE url=? ORDER BY ply", (g["url"],))]
+        if plies:
+            con.execute("UPDATE games SET summary=? WHERE url=?", (json.dumps(summarize(tag_mistakes(plies))), g["url"]))
+            n += 1
+    meta_set(con, "summary_v", SUMMARY_V)
+    meta_set(con, "game_export_v", "")   # 외통 놓침 분류가 바뀌므로 상세 JSON 전부 다시
+    con.commit()
+    if n:
+        log(f"게임 요약 다시 계산 (규칙 v{SUMMARY_V}): {n}판")
+    return n
+
+
 def summarize(plies):
     """게임 하나의 요약 (DB summary 컬럼, 알림, 최근 게임 목록에 사용)."""
     mine = [p for p in plies if p["mine"]]
@@ -714,7 +769,7 @@ def summarize(plies):
     for i, p in enumerate(plies):
         if p["mine"] and p["loss"] >= 200 and opp_best_captures(p, plies[i + 1] if i + 1 < len(plies) else None):
             hung += 1
-    missed_mate = sum(1 for p in mine if p["cp_before"] >= 9000 and p["cp_after"] < 9000)
+    n_missed_mate = sum(1 for p in mine if missed_mate(p))
     return dict(
         accuracy=acc([p["wp_loss"] for p in mine]), opp_accuracy=acc([p["wp_loss"] for p in opp]),
         blunders=sum(1 for p in mine if p["loss"] >= 300), mistakes=sum(1 for p in mine if 100 <= p["loss"] < 300),
@@ -723,7 +778,7 @@ def summarize(plies):
                     cp_before=worst["cp_before"], cp_after=worst["cp_after"], wp_loss=worst["wp_loss"],
                     clock=worst["clock"], fen=worst["fen"], uci=uci_of(worst["fen"], worst["san"]),
                     best_uci=uci_of(worst["fen"], worst["best"]) if worst["best"] else None) if worst else None),
-        n_moves=len(mine), hung=hung, missed_mate=missed_mate, brilliant=sum(1 for p in mine if p.get("brill")),
+        n_moves=len(mine), hung=hung, missed_mate=n_missed_mate, brilliant=sum(1 for p in mine if p.get("brill")),
         great=sum(1 for p in mine if p.get("great")),
         my_clock_20=(my_clk[19] if len(my_clk) >= 20 else None), opp_clock_20=(op_clk[19] if len(op_clk) >= 20 else None),
         my_final_clock=(my_clk[-1] if my_clk else None), opp_final_clock=(op_clk[-1] if op_clk else None),
@@ -814,13 +869,13 @@ def lines_todo(con):
         if not best or k in seen:
             return
         seen.add(k)
-        if not con.execute("SELECT 1 FROM lines WHERE fen=? AND played=? AND best=?", k).fetchone():
+        if not con.execute("SELECT 1 FROM lines WHERE fen=? AND played=? AND best=? AND depth=?", k + (LINE_DEPTH,)).fetchone():
             todo.append(k)
     # 1) 큰 실수 (승률 20%p 이상 또는 3점 이상 손해)
     for r in con.execute("""SELECT p.fen, p.san, p.best FROM plies p JOIN games g ON g.url=p.url
                             WHERE p.mine=1 AND p.best IS NOT NULL AND (p.wp_loss>=20 OR p.loss>=300)
-                              AND NOT EXISTS (SELECT 1 FROM lines l WHERE l.fen=p.fen AND l.played=p.san AND l.best=p.best)
-                            ORDER BY g.end_time DESC, p.ply""").fetchall():
+                              AND NOT EXISTS (SELECT 1 FROM lines l WHERE l.fen=p.fen AND l.played=p.san AND l.best=p.best AND l.depth=?)
+                            ORDER BY g.end_time DESC, p.ply""", (LINE_DEPTH,)).fetchall():
         add(r[0], r[1], r[2])
     # 2) 판마다 가장 아픈 수 (최근 게임 목록의 장면 보기)
     for g in con.execute("SELECT summary FROM games WHERE analyzed=1 ORDER BY end_time DESC").fetchall():
@@ -867,8 +922,8 @@ def enrich_lines(con, cfg, limit=LINES_BATCH):
             except Exception as e:   # 한 국면이 실패해도 계속. 빈 결과를 저장해 매번 다시 시도하지 않는다
                 log(f"  수순 계산 실패 {san}: {e}")
                 data = dict(best_line=[], refutation=[], alts=[], puzzle_ok=False)
-            con.execute("INSERT OR REPLACE INTO lines(fen,played,best,data) VALUES(?,?,?,?)",
-                        (fen, san, best, json.dumps(data, ensure_ascii=False, separators=(",", ":"))))
+            con.execute("INSERT OR REPLACE INTO lines(fen,played,best,data,depth) VALUES(?,?,?,?,?)",
+                        (fen, san, best, json.dumps(data, ensure_ascii=False, separators=(",", ":")), LINE_DEPTH))
         con.commit()
     finally:
         eng.quit()
@@ -882,7 +937,7 @@ def enrich_lines(con, cfg, limit=LINES_BATCH):
 def cached_lines(con, fen, san, best=None):
     """계산해 둔 수순. lines 테이블(현재 깊이)이 우선이고, 아직 없으면 예전 pv_cache 를 쓰되
     그 정답 수순의 첫 수가 최선 수와 다르면 숨긴다 (깊이가 달라 어긋난 경우)."""
-    r = con.execute("SELECT data FROM lines WHERE fen=? AND played=? AND best=?", (fen, san, best or "")).fetchone()
+    r = con.execute("SELECT data FROM lines WHERE fen=? AND played=? AND best=? AND depth=?", (fen, san, best or "", LINE_DEPTH)).fetchone()
     if r:
         d = json.loads(r[0])
         return dict(d, best_line=d.get("best_line", []), refutation=d.get("refutation", []), alts=d.get("alts", []))
@@ -986,8 +1041,8 @@ def store_analysis(con, url, plies):
 
 def analyze_pending(con, cfg):
     sf = stockfish_path(cfg)
-    rows = con.execute("SELECT url,pgn,my_color FROM games WHERE analyzed=0 ORDER BY end_time").fetchall()
-    redo = con.execute("SELECT url,pgn,my_color FROM games WHERE analyzed=1 AND (depth IS NULL OR depth!=?) ORDER BY end_time DESC LIMIT ?",
+    rows = con.execute("SELECT url,pgn,my_color,time_control FROM games WHERE analyzed=0 ORDER BY end_time").fetchall()
+    redo = con.execute("SELECT url,pgn,my_color,time_control FROM games WHERE analyzed=1 AND (depth IS NULL OR depth!=?) ORDER BY end_time DESC LIMIT ?",
                        (DEPTH, REANALYZE_BATCH)).fetchall()
     if not rows and not redo:
         return []
@@ -997,18 +1052,23 @@ def analyze_pending(con, cfg):
         left = con.execute("SELECT COUNT(*) FROM games WHERE analyzed=1 AND (depth IS NULL OR depth!=?)", (DEPTH,)).fetchone()[0]
         log(f"깊이 {DEPTH} 로 재분석 {len(redo)}판 (남은 {left}판)")
     rows = list(rows) + list(redo)
-    tasks = [(r["url"], r["pgn"], r["my_color"], sf) for r in rows]
+    tasks = [(r["url"], r["pgn"], r["my_color"], sf, 1, r["time_control"]) for r in rows]
     done = []
     t0 = time.time()
 
     def finish(url, plies):
+        if plies is None:   # 엔진/기보 오류: 표시만 해 두고 다음 판으로 (매분 같은 판에서 죽지 않게)
+            con.execute("UPDATE games SET analyzed=-1 WHERE url=?", (url,))
+            con.commit()
+            log(f"  분석 실패로 건너뜀 {url}")
+            return
         store_analysis(con, url, plies)
         export_game(con, dict(con.execute("SELECT * FROM games WHERE url=?", (url,)).fetchone()))
         done.append(url)
         log(f"  분석 완료 {url} ({time.time() - t0:.0f}s)")
 
     if len(tasks) == 1:   # 한 판이면 엔진 스레드를 모두 써서 알림을 앞당긴다
-        finish(*analyze_game(tasks[0] + (WORKERS,)))
+        finish(*analyze_game(tasks[0][:4] + (WORKERS,) + tasks[0][5:]))
     else:
         with Pool(min(WORKERS, len(tasks))) as pool:
             for url, plies in pool.imap_unordered(analyze_game, tasks):
@@ -1094,9 +1154,9 @@ def pregame_gap(games):
     return out
 
 
-def vs_rating_stats(games):
+def vs_rating_stats(games, gap=None):
     """상대 레이팅별 성적: 대국 전 추정 레이팅이 나보다 RATING_GAP 이상 높은 상대 / 비슷한 상대 / RATING_GAP 이상 낮은 상대."""
-    gap = pregame_gap(games)
+    gap = gap or pregame_gap(games)
     b = defaultdict(list)
     for g in games:
         d = gap[g["url"]]
@@ -1135,7 +1195,8 @@ def tilt_stats(games):
     )
 
 
-def compute_stats(games, con=None):
+def compute_stats(games, con=None, gap=None):
+    """games 의 통계. gap 은 전체 이력으로 구한 대국 전 레이팅 차이(pregame_gap) — 30일·7일 창의 첫 판도 직전 판을 알도록."""
     if not games:
         return None
     mine = [p for g in games for p in g["plies"] if p["mine"]]
@@ -1172,12 +1233,13 @@ def compute_stats(games, con=None):
     tm["timeouts_winning"] = sum(1 for g in to if g["summary"].get("max_eval", 0) >= 200 and
                                  [p for p in g["plies"] if p["mine"]][-1]["cp_after"] >= 200)
     tm["opp_timeouts"] = sum(1 for g in games if g["opp_result"] == "timeout")
-    buckets = [(0, 30), (30, 60), (60, 120), (120, 300), (300, 601)]
+    top = max([600] + [parse_tc(g.get("time_control"))[0] for g in games])   # 가장 긴 시간 제어의 기본 시간까지 (증초로 그 위로 가도 포함)
+    buckets = [(0, 30), (30, 60), (60, 120), (120, 300), (300, 10 ** 9)]
     tm["blunder_by_clock"] = []
     for lo, hi in buckets:
         v = [p for p in mine if p["clock"] is not None and lo <= p["clock"] < hi]
         if v:
-            tm["blunder_by_clock"].append(dict(label=f"{lo}-{hi if hi < 601 else 600}s", moves=len(v),
+            tm["blunder_by_clock"].append(dict(label=f"{lo}-{hi if hi < 10 ** 9 else top}s", moves=len(v),
                                                rate=round(sum(1 for p in v if p["loss"] >= 300) / len(v) * 100, 1)))
     sb = [(0, 3), (3, 10), (10, 30), (30, 60), (60, 9999)]
     tm["blunder_by_spent"] = []
@@ -1199,8 +1261,8 @@ def compute_stats(games, con=None):
         return round((c["W"] + 0.5 * c["D"]) / len(v) * 100, 1) if v else None
     tm["ahead_at_20"] = dict(n=len(ahead), score=score_of(ahead))
     tm["behind_at_20"] = dict(n=len(behind), score=score_of(behind))
-    tm["low_clock_games"] = dict(n=sum(1 for g in games if (g["summary"].get("my_final_clock") or 999) < 30),
-                                 losses=sum(1 for g in games if (g["summary"].get("my_final_clock") or 999) < 30 and g["outcome"] == "L"))
+    tm["low_clock_games"] = dict(n=sum(1 for g in games if _clk(g["summary"].get("my_final_clock")) < 30),
+                                 losses=sum(1 for g in games if _clk(g["summary"].get("my_final_clock")) < 30 and g["outcome"] == "L"))
     S["time"] = tm
 
     # --- 국면별
@@ -1247,11 +1309,11 @@ def compute_stats(games, con=None):
                 pt = opp_best_captures(p, pl[i + 1] if i + 1 < len(pl) else None)
                 if pt:
                     hung[pn[pt]] += 1
-                    hung_clock["<60s" if (p["clock"] or 999) < 60 else ">=60s"] += 1
+                    hung_clock["<60s" if _clk(p["clock"]) < 60 else ">=60s"] += 1
     missed_free = sum(1 for p in mine if not p["is_best"] and p["loss"] >= 200 and p["best"] and "x" in p["best"])
     mm = Counter()
     for p in mine:
-        if p["cp_before"] >= 9000 and p["cp_after"] < 9000:
+        if missed_mate(p):
             mm[min((10000 - p["cp_before"]) // 10, 5)] += 1
     S["tactics"] = dict(hung=dict(hung), hung_total=sum(hung.values()), hung_pg=round(sum(hung.values()) / n, 2),
                         hung_with_time=hung_clock[">=60s"], missed_free=missed_free,
@@ -1333,9 +1395,9 @@ def compute_stats(games, con=None):
             if not p["mine"]:
                 continue
             base = mistake_rec(g, p)
-            if len(S["examples"]["missed_mate"]) < 5 and p["cp_before"] >= 9970 and p["cp_after"] < 9000:
+            if len(S["examples"]["missed_mate"]) < 5 and p["cp_before"] >= 9970 and missed_mate(p):
                 S["examples"]["missed_mate"].append(base)
-            elif len(S["examples"]["hung"]) < 5 and p["loss"] >= 300 and (p["clock"] or 999) >= 60 and \
+            elif len(S["examples"]["hung"]) < 5 and p["loss"] >= 300 and _clk(p["clock"]) >= 60 and \
                     opp_best_captures(p, pl[i + 1] if i + 1 < len(pl) else None) in (2, 3, 4, 5):
                 S["examples"]["hung"].append(base)
             elif len(S["examples"]["collapse"]) < 5 and p["cp_before"] >= 300 and p["cp_after"] <= -100:
@@ -1350,7 +1412,7 @@ def compute_stats(games, con=None):
     # 대단한 수(응징형): 개수만 센다. 장면은 게임 페이지에서 본다
     gm = [p for g in games for p in g["plies"] if p["mine"] and p.get("great")]
     S["great"] = dict(n=len(gm), opp=sum(1 for g in games for p in g["plies"] if not p["mine"] and p.get("great")), pg=round(len(gm) / n, 2))
-    S["vs_rating"] = vs_rating_stats(games)
+    S["vs_rating"] = vs_rating_stats(games, gap)
     S["coach"] = coach_stats(games, con)
     S["repertoire"] = repertoire_stats(games, con)
     S["weaknesses"] = weaknesses(S, games)
@@ -1419,11 +1481,11 @@ def highlights(plies, summary, avg=None):
         if v:
             out.append(dict(key=key, title=f"{name} {len(v)}개", text=" ".join(f"{p['move']}.{'' if p['mover'] == 'w' else '..'}{p['san']}" for p in v), ply=v[0]["ply"]))
     # 2. 외통 마무리: 강제 외통이 보인 뒤 한 번도 놓치지 않고 끝냈다
+    win = s.get("outcome") == "W" if "outcome" in s else None
     mate = [p for p in mine if p["cp_before"] >= 9000]
-    if len(mate) >= 2 and all(p["cp_after"] >= 9000 for p in mate):
+    if win and len(mate) >= 2 and all(not missed_mate(p) for p in mate):
         out.append(dict(key="mate", title=f"외통 {len(mate)}수를 놓치지 않고 마무리", text=f"{mate[0]['move']}수부터 끝까지 외통 수순을 정확히 뒀습니다.", ply=mate[0]["ply"]))
     # 3. 유리해진 뒤 흔들리지 않고 이김 / 불리한 판을 뒤집음
-    win = s.get("outcome") == "W" if "outcome" in s else None
     first = next((p for p in mine if p["cp_after"] >= 300), None)
     if win and first:
         after = [p for p in mine if p["ply"] >= first["ply"]]
@@ -1590,23 +1652,44 @@ def refresh_percentile(con, cfg, rating, now=None):
     값이 바뀌었을 때만 True. 실패하면 PCT_RETRY 뒤에 다시 시도한다."""
     now = now or time.time()
     cur = anchor_get(con)
-    if cur.get("source") == "chess.com" and cur.get("rating") == rating and now - cur.get("ts", 0) < PCT_MAX_AGE:
+    if cur.get("source") == "chess.com" and cur.get("for_rating", cur.get("rating")) == rating and now - cur.get("ts", 0) < PCT_MAX_AGE:
         return False
-    tried = meta_get(con, "pct_tried")
-    if tried and float(tried) > 0 and now - float(tried) < PCT_RETRY:
+    tried = pct_tried_get()
+    if tried and now - tried < PCT_RETRY:
         return False
-    meta_set(con, "pct_tried", str(now))   # 실패하면(예외) 남아서 PCT_RETRY 동안 다시 시도하지 않는다
+    pct_tried_set(now)   # 실패(예외)하거나 페이지가 아직 새 레이팅이 아니면 PCT_RETRY 동안 다시 시도하지 않는다
     me = cfg["CHESSCOM_USERNAME"].lower()
     below, shown = fetch_percentile(me)
     if below is None:
         raise RuntimeError("전적 페이지에 백분위가 없습니다")
-    meta_set(con, "pct_tried", "0")
-    new = dict(rating=shown or rating, below=below, date=datetime.fromtimestamp(now, KST).strftime("%Y-%m-%d"), ts=int(now), source="chess.com")
+    # 페이지의 레이팅이 DB 와 같을 때만 '이 레이팅 것을 읽었다'(for_rating)고 적는다. 다르면(체스닷컴 반영 전) 한 시간 뒤 다시 읽는다
+    new = dict(rating=shown or rating, for_rating=shown or rating, below=below, date=datetime.fromtimestamp(now, KST).strftime("%Y-%m-%d"),
+               ts=int(now), source="chess.com")
     changed = (new["rating"], new["below"]) != (cur.get("rating"), cur.get("below")) or cur.get("source") != "chess.com"
-    meta_set(con, "pct_anchor", json.dumps(new, ensure_ascii=False))
+    if changed or new["for_rating"] != cur.get("for_rating") or now - cur.get("ts", 0) >= PCT_MAX_AGE:   # 값이 같으면 DB 를 더럽히지 않는다
+        meta_set(con, "pct_anchor", json.dumps(new, ensure_ascii=False))
     if changed:
         log(f"체스닷컴 백분위 갱신: {new['rating']}점 → 상위 {100 - below:g}%")
+    if new["for_rating"] == rating:
+        pct_tried_set(0)
     return changed
+
+
+def pct_tried_path():
+    return os.path.join(DATA, "pct_tried")   # 러너 로컬 (git 에 올리지 않는다). 시도 시각을 DB 에 두면 시도마다 DB 커밋이 생긴다
+
+
+def pct_tried_get():
+    try:
+        with open(pct_tried_path()) as f:
+            return float(f.read().strip() or 0)
+    except (OSError, ValueError):
+        return 0.0
+
+
+def pct_tried_set(ts):
+    with open(pct_tried_path(), "w") as f:
+        f.write(str(ts))
 
 
 def tier_info(rating, anchor=None):
@@ -2329,7 +2412,7 @@ def weaknesses(S, games=None):
         s3 = next((x for x in tl["streak"] if x["label"] == "3연패 이상 후"), None)
         n2 = (s2["n"] if s2 else 0) + (s3["n"] if s3 else 0)
         if n2 >= 10:
-            w2 = (s2["score"] * s2["n"] + s3["score"] * s3["n"]) / n2 if s2 and s3 else (s2 or s3)["score"]
+            w2 = sum(x["score"] * x["n"] for x in (s2, s3) if x and x["n"]) / n2   # 한쪽 버킷이 비면 score 가 None 이라 빼고 더한다
             if w2 <= ov["score"] - 10:
                 sub = [POINTS[g["outcome"]] for g in games if ctx[g["url"]]["streak"] >= 2]
                 rest = [POINTS[g["outcome"]] for g in games if ctx[g["url"]]["streak"] < 2]
@@ -2367,7 +2450,7 @@ def weaknesses(S, games=None):
 
 # ---------------------------------------------------------------- 게임 상세 JSON
 def classify(p):
-    if p["cp_before"] >= 9000 and p["cp_after"] < 9000:
+    if missed_mate(p):
         return "miss"
     if p.get("brill"):
         return "brill"
@@ -2425,7 +2508,7 @@ def export_game(con, g):
                 depth=g.get("depth") or DEPTH, pv_depth=LINE_DEPTH)
     os.makedirs(os.path.join(DOCS, "games"), exist_ok=True)
     path = os.path.join(DOCS, "games", f"{data['id']}.json")
-    json.dump(data, open(path, "w"), ensure_ascii=False, separators=(",", ":"))
+    dump_json(path, data)
     return path
 
 
@@ -2496,7 +2579,8 @@ def notify(cfg, game, summary, dashboard_url, con=None):
     how = {"checkmated": "체크메이트", "resigned": "기권", "timeout": "시간패", "abandoned": "포기"}
     detail = how.get(game["my_result"] if game["outcome"] == "L" else game["opp_result"], "")
     color = "백" if game["my_color"] == "w" else "흑"
-    lines = [f"{color} vs {game['opp']}({game['opp_elo']}) · 정확도 {summary['accuracy']}% · 대실수 {summary['blunders']} 실수 {summary['mistakes']}"]
+    acc_t = f"{summary['accuracy']}%" if summary.get("accuracy") is not None else "-"
+    lines = [f"{color} vs {game['opp']}({game['opp_elo']}) · 정확도 {acc_t} · 대실수 {summary.get('blunders', 0)} 실수 {summary.get('mistakes', 0)}"]
     w = summary.get("worst")
     if w and w["wp_loss"] >= 10:
         mv = f"{w['move']}.{'' if w['mover'] == 'w' else '..'}{w['san']}"
@@ -2518,8 +2602,10 @@ def notify(cfg, game, summary, dashboard_url, con=None):
     click = f"{dashboard_url.rstrip('/')}/game.html?id={game_id(game['url'])}{'&ply=' + str((w['move'] - 1) * 2 + (1 if w['mover'] == 'w' else 2)) if w else ''}"
     actions = [{"label": "대시보드", "url": dashboard_url}, {"label": "체스닷컴", "url": game["url"]}]
     png = board_png(w, game["my_color"]) if w and w.get("fen") else None
-    if send_ntfy(cfg, title, "\n".join(lines), click=click, tags=["trophy" if game["outcome"] == "W" else "x"], actions=actions, png=png):
+    ok = send_ntfy(cfg, title, "\n".join(lines), click=click, tags=["trophy" if game["outcome"] == "W" else "x"], actions=actions, png=png)
+    if ok:
         log(f"알림 전송: {game['url']}{' (보드 이미지 포함)' if png else ''}")
+    return ok
 
 
 # 알림 대기열: 워크플로가 커밋·푸시하고 GitHub Pages 가 배포한 뒤에 알림을 보내기 위한 파일 (git 에 올리지 않는다).
@@ -2529,15 +2615,30 @@ def queue_path():
 
 
 def queue_load():
+    """대기열 url 목록 (재시도 횟수는 queue_tries 가 따로 든다)."""
     try:
-        return json.load(open(queue_path()))
+        with open(queue_path()) as f:
+            q = json.load(f)
+        return [x["url"] if isinstance(x, dict) else x for x in q]
     except Exception:
         return []
 
 
-def queue_save(q):
+def queue_tries():
+    try:
+        with open(queue_path()) as f:
+            return {x["url"]: x.get("tries", 0) for x in json.load(f) if isinstance(x, dict)}
+    except Exception:
+        return {}
+
+
+NOTIFY_TRIES = 3
+
+
+def queue_save(q, tries=None):
     if q:
-        json.dump(q, open(queue_path(), "w"))
+        tries = tries or {}
+        dump_json(queue_path(), [dict(url=u, tries=tries.get(u, 0)) for u in q])
     elif os.path.exists(queue_path()):
         os.remove(queue_path())
 
@@ -2547,7 +2648,7 @@ def wait_for_page(url, timeout=150, every=5):
     t0 = time.time()
     while True:
         try:
-            req = urllib.request.Request(f"{url}?t={int(time.time() * 1000)}", headers={"User-Agent": "chess-dashboard", "Cache-Control": "no-cache"})
+            req = urllib.request.Request(url, headers={"User-Agent": "chess-dashboard", "Cache-Control": "no-cache"})
             with urllib.request.urlopen(req, timeout=15) as r:
                 if r.status == 200:
                     return True
@@ -2560,7 +2661,7 @@ def wait_for_page(url, timeout=150, every=5):
 
 def send_queued(con, cfg, timeout=150):
     """대기열의 게임 알림을, 그 게임 페이지가 배포된 것을 확인한 뒤 보낸다."""
-    q = queue_load()
+    q, tries = queue_load(), queue_tries()
     sent = 0
     for url in list(q):
         g = con.execute("SELECT * FROM games WHERE url=?", (url,)).fetchone()
@@ -2569,10 +2670,17 @@ def send_queued(con, cfg, timeout=150):
             t0 = time.time()
             ok = wait_for_page(f"{base}games/{game_id(url)}.json", timeout)
             log(f"페이지 배포 {'확인' if ok else '대기 시간 초과'} ({time.time() - t0:.0f}s): {game_id(url)}")
-            notify(cfg, dict(g), json.loads(g["summary"]), base, con)
-            sent += 1
+            if notify(cfg, dict(g), json.loads(g["summary"]), base, con):
+                sent += 1
+            else:   # ntfy 가 안 되면 대기열에 남겨 다음 반복에 다시 보낸다 (NOTIFY_TRIES 번까지)
+                tries[url] = tries.get(url, 0) + 1
+                if tries[url] < NOTIFY_TRIES:
+                    log(f"알림 재시도 예정 ({tries[url]}/{NOTIFY_TRIES}): {game_id(url)}")
+                    queue_save(q, tries)
+                    continue
+                log(f"알림 {NOTIFY_TRIES}번 실패해 포기: {game_id(url)}")
         q.remove(url)
-        queue_save(q)
+        queue_save(q, tries)
     return sent
 
 
@@ -2629,11 +2737,12 @@ def maybe_weekly(con, cfg, now=None):
     if last == week or (now.weekday() == 0 and now.hour < 9):
         return False
     msg = weekly_message(con, now)
-    meta_set(con, "weekly_sent", week)
     if not msg:
+        meta_set(con, "weekly_sent", week)
         return False
     ok = send_ntfy(cfg, msg[0], msg[1], click=dashboard_url(cfg) + "index.html?w=7d", tags=["calendar"])
-    if ok:
+    if ok:   # 실패하면 기록하지 않아 다음 분에 다시 보낸다
+        meta_set(con, "weekly_sent", week)
         log(f"주간 요약 전송: {msg[0]}")
     return ok
 
@@ -2677,9 +2786,16 @@ def _read_code_hash():
     return open(p).read().strip() if os.path.exists(p) else ""
 
 
+_PUZZLE_CACHE = {}
+
+
 def puzzle_candidates(con, limit=200):
     """퍼즐이 되는 내 실수 국면: 승률 20%p 이상 잃은 수, 아직 가망이 있던 국면, 최근 게임부터.
-    수순과 복수 정답이 계산된 국면만 쓰고, 좋은 수가 너무 많거나 분석이 엇갈린 국면(puzzle_ok=False)은 뺀다."""
+    수순과 복수 정답이 계산된 국면만 쓰고, 좋은 수가 너무 많거나 분석이 엇갈린 국면(puzzle_ok=False)은 뺀다.
+    한 실행에 두 번 불리므로 그 사이 DB 에 쓴 것이 없으면(total_changes) 지난 결과를 돌려준다."""
+    key = (id(con), con.total_changes, limit)
+    if key in _PUZZLE_CACHE:
+        return _PUZZLE_CACHE[key]
     out = []
     for g in con.execute("SELECT * FROM games WHERE analyzed=1 ORDER BY end_time DESC").fetchall():
         g = dict(g)
@@ -2708,6 +2824,7 @@ def puzzle_candidates(con, limit=200):
             out.append(w)
         if len(out) >= limit:
             break
+    _PUZZLE_CACHE.clear(); _PUZZLE_CACHE[key] = out[:limit]
     return out[:limit]
 
 
@@ -2718,7 +2835,7 @@ def export_puzzles(con, limit=200):
         m = cached_moves(con, w["fen"])
         if m:
             w["moves"] = m
-    json.dump(out, open(os.path.join(DOCS, "puzzles.json"), "w"), ensure_ascii=False, separators=(",", ":"))
+    dump_json(os.path.join(DOCS, "puzzles.json"), out)
     return len(out)
 
 
@@ -2730,10 +2847,11 @@ def render_all(con, cfg):
     if games_all:
         meta_set(con, "avg", json.dumps(game_avg(games_all)))     # 잘한 점의 '평소 평균' (게임 페이지·최근 게임 모두 전체 기간 기준)
     book = build_book(con, games_all)[0] if games_all else {}
+    gap = pregame_gap(games_all)
     windows = {
-        "all": compute_stats(games_all, con),
-        "30d": compute_stats(load_games(con, int((now - timedelta(days=30)).timestamp())), con),
-        "7d": compute_stats(load_games(con, int((now - timedelta(days=7)).timestamp())), con),
+        "all": compute_stats(games_all, con, gap),
+        "30d": compute_stats(load_games(con, int((now - timedelta(days=30)).timestamp())), con, gap),
+        "7d": compute_stats(load_games(con, int((now - timedelta(days=7)).timestamp())), con, gap),
     }
     payload = dict(username=cfg["CHESSCOM_USERNAME"], generated=now.strftime("%Y-%m-%d %H:%M"),
                    meta=dict(depth=DEPTH, pv_depth=LINE_DEPTH), windows=windows)
@@ -2750,18 +2868,17 @@ def render_all(con, cfg):
         for r in ((windows.get("all") or {}).get("repertoire", {}).get(c) or {}).get("rows", []):
             if r["id"] in book:
                 book[r["id"]]["trouble"] = (r.get("trouble") or [])[:3]
-    json.dump(dict(generated=payload["generated"], depth=BOOK_DEPTH, moves=EARLY_MOVES, openings=book),
-              open(os.path.join(DOCS, "book.json"), "w"), ensure_ascii=False, separators=(",", ":"))
+    dump_json(os.path.join(DOCS, "book.json"), dict(generated=payload["generated"], depth=BOOK_DEPTH, moves=EARLY_MOVES, openings=book))
     # 첫 화면이 빨리 뜨도록 stats.json 에는 전체 기간만 담고, 최근 30일·7일은 탭을 누를 때 받는 작은 파일로 나눈다
-    json.dump(dict(payload, windows=dict(all=windows["all"])), open(os.path.join(DOCS, "stats.json"), "w"), ensure_ascii=False)
+    dump_json(os.path.join(DOCS, "stats.json"), dict(payload, windows=dict(all=windows["all"])))   # 공백 없는 JSON (약 15% 작다)
     for w in ("30d", "7d"):
-        json.dump(dict(generated=payload["generated"], window=windows[w]), open(os.path.join(DOCS, f"stats-{w}.json"), "w"), ensure_ascii=False)
+        dump_json(os.path.join(DOCS, f"stats-{w}.json"), dict(generated=payload["generated"], window=windows[w]))
     # 게임·퍼즐 페이지가 읽는 작은 요약: 전체 기간의 집중 과제와 유형별 최근 빈도
     co = (windows["all"] or {}).get("coach") or dict(cats=[], focus=[], games=0, k=0)
-    json.dump(dict(generated=payload["generated"], games=co["games"], k=co["k"], focus=co["focus"],
+    dump_json(os.path.join(DOCS, "coach.json"),
+              dict(generated=payload["generated"], games=co["games"], k=co["k"], focus=co["focus"],
                    cats={c["key"]: dict(n=c["n"], games=c["games"], share=c["share"], recent=c["recent"]["games"], puzzles=c.get("puzzles", 0))
-                         for c in co["cats"]}),
-              open(os.path.join(DOCS, "coach.json"), "w"), ensure_ascii=False, separators=(",", ":"))
+                         for c in co["cats"]}))
     write_pieces(DOCS)
     open(os.path.join(DOCS, ".nojekyll"), "w").write("")
     open(os.path.join(DOCS, ".code-hash"), "w").write(code_hash())
@@ -2832,6 +2949,7 @@ def main():
         except Exception as e:
             log(f"체스닷컴 백분위 읽기 실패: {e}")
     brill_n = retag_brilliant(con)   # 판정 규칙이 바뀌었을 때만 전체 다시 판정 (엔진 없이 몇 초)
+    brill_n += resummarize(con)
     # 실수 국면의 수순·복수 정답. 밀린 것이 있으면 한 번에 LINES_BATCH 개씩, 최근 게임부터.
     lines_n, lines_urls = 0, set()
     try:
@@ -2864,6 +2982,8 @@ def main():
         log("코드가 바뀌어 통계를 다시 만듭니다")
     rendered = bool(new_done or lines_n or book_n or moves_n or purged or brill_n or pct_n or a.render_only or code_changed or not os.path.exists(index))
     if rendered:
+        if new_done:   # 잘한 점의 '평소 평균'을 먼저 갱신해야 새 판의 상세 JSON 과 최근 게임 카드가 같은 기준을 쓴다
+            meta_set(con, "avg", json.dumps(game_avg(load_games(con))))
         # 수순이 새로 계산된 게임의 상세 JSON 은 다시 내보낸다
         for url in set(new_done) | lines_urls:
             export_game(con, dict(con.execute("SELECT * FROM games WHERE url=?", (url,)).fetchone()))

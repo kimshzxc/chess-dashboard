@@ -9,7 +9,7 @@
 필요: google-chrome 또는 chromium, `pip install websocket-client chess`.
 로컬 점검은 docs/ 에 stats.json, puzzles.json, games/ 가 있어야 한다 (`python tools/gh_pull.py`).
 실패가 하나라도 있으면 종료 코드 1."""
-import argparse, base64, functools, http.server, json, os, shutil, socket, subprocess, sys, tempfile, threading, time, urllib.request
+import re, argparse, base64, functools, http.server, json, os, shutil, socket, subprocess, sys, tempfile, threading, time, urllib.request
 
 try:
     import websocket
@@ -248,6 +248,12 @@ def run(c, base, server, shots):
     v = c.ev(VIS); check("홈에는 홈 섹션만 보인다", v and set(v) == {"home"}, v)
     o = c.ev(OVER); check("가로 넘침 없음 (홈)", o[0] <= o[1], o)
     check("히어로 레이팅 숫자", str(S["overview"]["rating"]) in (c.ev("document.querySelector('.herocard .big')?.textContent") or ""))
+    check("각주에 갱신 경과 시간", bool(re.search(r"(방금|\d+(분|시간|일) 전)", c.ev("document.querySelector('#foot')?.textContent") or "")))
+    # 쿼리로 열어도 한 번 쓰고 지워 탭바 링크가 같은 문서를 가리킨다 (탭마다 전부 다시 받지 않게)
+    c.go(base + "index.html?w=all" + ("&" + q("")[1:] if q("") else ""), READY); c.pump(0.3)
+    check("쿼리는 쓰고 나서 주소에서 지운다", c.ev("location.search") == "", c.ev("location.search"))
+    c.go(base + "index.html" + q(), READY)
+    check("레이팅 그래프의 글자 크기가 화면에 맞는다 (viewBox 너비 = 그려진 너비)", c.ev("(()=>{const s=document.querySelector('#rchart'); if(!s) return true; const w=s.getBoundingClientRect().width, v=s.viewBox.baseVal.width; return Math.abs(w-v)<60;})()"))
     tier = S["overview"].get("tier") or {}
     check("히어로 티어 엠블럼과 상위 비율", c.ev("!!document.querySelector('.tierrow svg.tier-badge')") and tier.get("label", "") in (c.ev("document.querySelector('.tierrow')?.textContent") or "")
           and f"상위 {'' if (tier.get('anchor') or {}).get('exact') else '약 '}{tier.get('top', 0):g}%" in (c.ev("document.querySelector('.tierrow')?.textContent") or "") and c.ev("document.querySelector('.tierrow svg').classList.contains('" + tier.get("tier", "") + "')"), tier.get("label"))
@@ -515,6 +521,7 @@ def run(c, base, server, shots):
     Y = 640   # 고정된 보드 아래에서 누른다
     lab0 = c.ev("[...document.querySelectorAll('#board svg text')].map(t=>t.textContent).join('')"); c.tap("#optflip", y_target=Y)
     check("판 뒤집기", lab0 != c.ev("[...document.querySelectorAll('#board svg text')].map(t=>t.textContent).join('')")); c.tap("#optflip", y_target=Y)
+    check("나무결 무늬가 테마 적용 뒤에도 남는다", c.ev("(()=>{const g=document.querySelector('#board svg.board use.grain'); return !g||g.getAttribute('href')==='#grain-img';})()"))
     c.tap("#graph", y_target=Y, fx=0.25); check("평가 그래프를 누르면 그 수로", abs(c.ev(CUR) - n * 0.25) <= 2, c.ev(CUR))
     if any(p.get("clock") is not None for p in G["plies"]):
         check("시계 그래프가 있다", c.ev("document.querySelectorAll('#cchart path').length") >= 2 and c.ev("document.querySelectorAll('.legend .lk').length") == 3 and c.ev("!!document.querySelector('#cchart .pace')"))

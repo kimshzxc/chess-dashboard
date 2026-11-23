@@ -4,7 +4,7 @@ name: chess watchdog
 
 on:
   schedule:
-    - cron: "7,37 * * * *"
+    - cron: "7,27,47 * * * *"   # 20분 간격: GitHub 이 매일 00:07 UTC 슬롯을 거르므로, 하나를 걸러도 40분 안에 되살린다
   workflow_dispatch:
 
 permissions:

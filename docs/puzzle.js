@@ -5,15 +5,16 @@
    puzzle-review   틀린 문제의 복습 일정 {id:{due, step, pz}}  1일 → 3일 → 7일 뒤에 다시. 틀리면 처음부터.
    puzzle-seen     풀어 본 문제 {id:날짜}  새 문제를 고를 때 안 푼 것부터 낸다.
    puzzle-history  날짜별 기록 {date:{ok,n}}  연속 일수와 최근 7일 막대. */
-document.body.insertAdjacentHTML('afterbegin', await fetch('pieces.svg').then(r=>r.text()));
-const ALL = await fetch('puzzles.json',{cache:'no-cache'}).then(r=>r.json()).catch(()=>[]);
+try{ document.body.insertAdjacentHTML('afterbegin', await fetch('pieces.svg').then(r=>{ if(!r.ok) throw new Error(`pieces.svg ${r.status}`); return r.text(); })); }catch(e){ loadError(e); throw e; }
+const ALL = await fetch('puzzles.json',{cache:'no-cache'}).then(r=>r.ok?r.json():[]).catch(()=>[]);
 $('#tpanel-slot').innerHTML=themePanel(); applyMode(); $('#pnav').innerHTML=practiceNav('puzzle');
 
 const DAY=864e5, DAILY=10, STEPS=[1,3,7], MAX_REVIEW=80, MAX_SEEN=600;
-const dkey=(off=0)=>new Date(Date.now()+9*3600*1000+off*DAY).toISOString().slice(0,10);   // KST 날짜, off 일 뒤
+const dkey=kstDay;   // KST 날짜, off 일 뒤 (shared.js)
 const TODAY=dkey(0);
-const load=(k,d)=>{ try{ const v=JSON.parse(localStorage.getItem(k)||'null'); return v??d; }catch(e){ return d; } };
-const save=(k,v)=>{ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} };
+/* 설치형 앱을 자정 너머 켜 둔 채 돌아오면 어제 묶음에 오늘 기록이 붙는다. 날짜가 바뀌었으면 다시 불러온다 */
+const dayCheck=()=>{ if(document.visibilityState==='visible'&&dkey(0)!==TODAY) location.reload(); };
+document.addEventListener('visibilitychange',dayCheck); window.addEventListener('pageshow',dayCheck);
 const HIST=load('puzzle-history',{}), REVIEW=load('puzzle-review',{}), SEEN=load('puzzle-seen',{});
 const BYID=Object.fromEntries(ALL.map(p=>[p.id,p]));
 const colorName=c=>c==='w'?'백':'흑';
@@ -88,7 +89,7 @@ function render(){
   if(!ALL.length&&!TD.ids.length){ $('#main').innerHTML='<div class="empty">퍼즐이 아직 없습니다. 게임이 분석되면 생깁니다.</div>'; return; }
   if(PRACTICE&&TD.idx>=TD.daily){   // 유형 연습 끝 (또는 이 유형의 퍼즐이 없음)
     const ok=Object.values(TD.res).filter(x=>x==='ok').length;
-    $('#main').innerHTML=`<div id="pzhead">${headHTML()}</div><div class="card done"><div class="sub">${TD.daily?`${esc(catInfo().n)} 연습 끝`:'이 유형의 퍼즐이 아직 없습니다'}</div>${TD.daily?`<div class="big">${ok} / ${TD.daily}</div><div class="sub">틀린 문제는 오늘의 퍼즐에 복습으로 다시 나옵니다.</div>`:''}<div class="acts"><a class="btn" href="${WIN?'index.html?tab=stats':`index.html?cat=${CAT}#mistakes`}">${WIN?'대시보드':'이 유형 사례'}</a><a class="btn on" href="puzzle.html">오늘의 퍼즐 ›</a></div></div>`;
+    $('#main').innerHTML=`<div id="pzhead">${headHTML()}</div><div class="card done"><div class="sub">${TD.daily?`${esc(catInfo().n)} 연습 끝`:'이 유형의 퍼즐이 아직 없습니다'}</div>${TD.daily?`<div class="big">${ok} / ${TD.daily}</div><div class="sub">틀린 문제는 오늘의 퍼즐에 복습으로 다시 나옵니다.</div>`:''}<div class="acts"><a class="btn" href="${WIN?'index.html#stats':`index.html?cat=${CAT}#mistakes`}">${WIN?'대시보드':'이 유형 사례'}</a><a class="btn on" href="puzzle.html">오늘의 퍼즐 ›</a></div></div>`;
     return;
   }
   if(TD.daily&&TD.idx===TD.daily&&!TD.cont){   // 오늘의 묶음 끝
@@ -132,12 +133,6 @@ function drawBoard(extra={}){
   applyTheme();
 }
 function toast(t){ const el=$('#pztoast'); if(!el) return; el.textContent=t; el.classList.add('on'); clearTimeout(toast.t); toast.t=setTimeout(()=>el.classList.remove('on'),1500); }
-function squareAt(svg,e){
-  const r=svg.getBoundingClientRect(); const px=(e.clientX-r.left)/r.width*800, py=(e.clientY-r.top)/r.height*800;
-  let fx=Math.floor(px/100), ry=Math.floor(py/100); if(fx<0||fx>7||ry<0||ry>7) return null;
-  if(cur().color==='b'){ fx=7-fx; ry=7-ry; }
-  return FILES[fx]+(8-ry);
-}
 function mine(sq){ const w=cur(); const p=parseFen(w.fen).find(x=>x.sq===sq); return p&&p.p[0]===w.color; }
 /* uci: 둔 수(예 'e2e4'), null 이면 '모르겠어요' */
 function answer(uci){
@@ -194,7 +189,7 @@ function uciSan(w,uci){
 }
 document.addEventListener('pointerdown',(e)=>{
   const svg=e.target.closest('#pzboard svg.board'); if(!svg||answered()) return;
-  const w=cur(), sq=squareAt(svg,e); if(!sq) return;
+  const w=cur(), sq=squareAt(svg,e,w.color==='b'); if(!sq) return;
   if(SEL&&sq!==SEL){
     if(mine(sq)){ SEL=sq; drawBoard(); return; }
     const legal=legalOf(w);
