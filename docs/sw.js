@@ -24,6 +24,8 @@ self.addEventListener('fetch', (e) => {
       return res;
     });
     if (!hit) return net;
-    return Promise.race([net, new Promise((r) => setTimeout(() => r(hit), 6000))]).catch(() => hit);
+    // 캐시로 답할 때는 헤더로 알려 화면이 '옛 데이터' 표시를 띄울 수 있게 한다
+    const stale = () => { const h = new Headers(hit.headers); h.set('x-sw-cache', '1'); return new Response(hit.body, { status: hit.status, statusText: hit.statusText, headers: h }); };
+    return Promise.race([net, new Promise((r) => setTimeout(() => r(stale()), 6000))]).catch(() => stale());
   })());
 });

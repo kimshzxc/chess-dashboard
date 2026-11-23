@@ -7,10 +7,16 @@ $('#tpanel-slot').innerHTML=themePanel(); applyMode(); $('#pnav').innerHTML=prac
 const Q=new URLSearchParams(location.search);
 const OPS=(BOOK&&BOOK.openings)||{};
 const rank=o=>o.verdict.startsWith('weak')?0:o.verdict==='even'?1:2;
-/* next: 취약한 오프닝부터, 아직 실수 없이 끝내지 못한 첫 라인 */
+/* 복습 일정 (퍼즐과 같은 간격): 실수 없이 끝내면 1일 → 3일 → 7일 → 14일 뒤, 틀리면 다음 날 다시. train-done 의 {due, step} */
+const STEPS=[1,3,7,14];
+const dueLines=(D)=>{ const t=today(), out=[]; for(const [oid,ls] of Object.entries(D)) for(const [i,l] of Object.entries(ls||{})) if(l&&l.due&&l.due<=t&&OPS[oid]&&OPS[oid].lines[+i]) out.push([OPS[oid],+i,l.due]); return out.sort((a,b)=>a[2].localeCompare(b[2])); };
+/* next: 복습 기한이 된 라인(오래된 것부터) → 아직 안 둬 본 라인(취약한 오프닝부터) → 실수 없이 끝내지 못한 라인 */
 function nextUp(){
   const D=load('train-done',{});
-  for(const o of Object.values(OPS).sort((a,b)=>rank(a)-rank(b)||b.n-a.n)){ const i=o.lines.findIndex((_,i)=>!((D[o.id]||{})[i]||{}).clean); if(i>=0) return [o,i]; }
+  const due=dueLines(D); if(due.length) return [due[0][0],due[0][1]];
+  const sorted=Object.values(OPS).sort((a,b)=>rank(a)-rank(b)||b.n-a.n);
+  for(const o of sorted){ const i=o.lines.findIndex((_,i)=>!(D[o.id]||{})[i]); if(i>=0) return [o,i]; }
+  for(const o of sorted){ const i=o.lines.findIndex((_,i)=>!((D[o.id]||{})[i]||{}).clean); if(i>=0) return [o,i]; }
   return null;
 }
 const NX=Q.get('next')?nextUp():null;
@@ -23,9 +29,11 @@ const num=(p,first)=>p.mover==='w'?`${p.move}.`:(first?`${p.move}…`:'');
 function listHTML(){
   const all=Object.values(OPS); if(!all.length) return '<div class="empty">연습 라인이 아직 만들어지지 않았습니다. 게임이 분석되면 몇 분 안에 생깁니다.</div>';
   all.sort((a,b)=>rank(a)-rank(b)||b.n-a.n);
-  let h=`<div class="sub" style="margin-top:14px">취약한 오프닝부터 · 내 15수째까지 직접 두어 봅니다</div><div class="card" style="margin-top:10px">`;
-  for(const o of all){ const v=VERD[o.verdict]||VERD.even, d=DONE[o.id]||{}, cl=o.lines.filter((_,i)=>d[i]&&d[i].clean).length;
-    h+=`<a class="trow" href="train.html?o=${encodeURIComponent(o.id)}"><div><div class="ok"><span class="side">${o.color==='w'?'백':'흑'}</span>${esc(o.name)}</div><div class="nm">${o.key?`<span class="mono">${esc(o.key)}</span> · `:''}${o.n}판 ${o.score}% · 라인 ${o.lines.length}개${cl?` · 완료 ${cl}`:''}</div></div>${o.verdict==='even'?'':`<span class="chip ${v[1]}">${v[0]}</span>`}</a>`; }
+  const dueN=dueLines(DONE).length;
+  let h=`<div class="sub" style="margin-top:14px">취약한 오프닝부터 · 내 15수째까지 직접 두어 봅니다${dueN?` · <a href="train.html?next=1"><b>복습할 라인 ${dueN}개</b> ›</a>`:''}</div><div class="card" style="margin-top:10px">`;
+  const t=today();
+  for(const o of all){ const v=VERD[o.verdict]||VERD.even, d=DONE[o.id]||{}, cl=o.lines.filter((_,i)=>d[i]&&d[i].clean).length, du=o.lines.filter((_,i)=>d[i]&&d[i].due&&d[i].due<=t).length;
+    h+=`<a class="trow" href="train.html?o=${encodeURIComponent(o.id)}"><div><div class="ok"><span class="side">${o.color==='w'?'백':'흑'}</span>${esc(o.name)}</div><div class="nm">${o.key?`<span class="mono">${esc(o.key)}</span> · `:''}${o.n}판 ${o.score}% · 라인 ${o.lines.length}개${cl?` · 완료 ${cl}`:''}${du?` · <b>복습 ${du}</b>`:''}</div></div>${o.verdict==='even'?'':`<span class="chip ${v[1]}">${v[0]}</span>`}</a>`; }
   return h+'</div>';
 }
 
@@ -53,7 +61,10 @@ function autoOpp(instant){
 }
 function finish(){
   ST.done=true;
-  const d=DONE[O.id]=DONE[O.id]||{}, e=d[LI]=d[LI]||{clean:0,n:0}; e.n++; if(!ST.miss&&!ST.shown) e.clean++; e.last=today(); save('train-done',DONE);
+  const d=DONE[O.id]=DONE[O.id]||{}, e=d[LI]=d[LI]||{clean:0,n:0}; e.n++; e.last=today();
+  if(!ST.miss&&!ST.shown){ e.clean++; e.step=Math.min((e.step||0)+1,STEPS.length); e.due=kstDay(STEPS[e.step-1]); }   // 깨끗이 끝내면 간격을 늘려 다시
+  else { e.step=0; e.due=kstDay(1); }                                                                                   // 틀리면 내일 다시
+  save('train-done',DONE);
   render();
 }
 function headHTML(){
@@ -81,7 +92,8 @@ function render(){
   }
   if(ST.done){
     const clean=!ST.miss&&!ST.shown;
-    msg=`<span class="ic">${clean?'완벽':'완료'}</span>${clean?'실수 없이 끝까지 뒀습니다.':`틀린 수 ${ST.miss}개${ST.shown?`, 정답을 본 수 ${ST.shown}개`:''}. 실수 없이 끝낼 때까지 다시 해 보세요.`} 이 진행의 끝 형세는 <b>${cpTxt(line().cp)}</b> (내 기준, 승률 ${wpTxt(line().cp)})입니다.`;
+    const e=(DONE[O.id]||{})[LI]||{};
+    msg=`<span class="ic">${clean?'완벽':'완료'}</span>${clean?`실수 없이 끝까지 뒀습니다.${e.due?` ${STEPS[(e.step||1)-1]}일 뒤 복습으로 다시 나옵니다.`:''}`:`틀린 수 ${ST.miss}개${ST.shown?`, 정답을 본 수 ${ST.shown}개`:''}. 내일 다시 나옵니다. 실수 없이 끝낼 때까지 해 보세요.`} 이 진행의 끝 형세는 <b>${cpTxt(line().cp)}</b> (내 기준, 승률 ${wpTxt(line().cp)})입니다.`;
   }
   h+=`<div class="result ${ST.done?(ST.miss||ST.shown?'':'ok'):ST.cls==='ng'?'ng':ST.cls==='ok'?'ok':''}" id="tmsg">${msg||'&nbsp;'}</div>`;
   h+=movesHTML();

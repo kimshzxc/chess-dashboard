@@ -1362,7 +1362,11 @@ def compute_stats(games, con=None, gap=None):
     # --- 판별 실수 기록 (홈의 "이번 규칙 하나"가 규칙을 정한 뒤의 판을 세는 데 쓴다): id, 끝난 시각, 날짜, 결과, 유형별 개수, 유리할 때(+3 이상)의 실수 수
     S["log"] = [dict(id=g["url"].rstrip("/").split("/")[-1], t=g["end_time"], d=g["date"], r=g["outcome"],
                      c=dict(Counter(p["cat"] for p in g["plies"] if p.get("cat"))),
-                     w=sum(1 for p in g["plies"] if p.get("cat") and p["cp_before"] >= 300)) for g in games]
+                     w=sum(1 for p in g["plies"] if p.get("cat") and p["cp_before"] >= 300),
+                     # 게임 탭의 전체 목록 필터·검색용
+                     o=g["opp"], cl=g["my_color"], e=g.get("eco_name") or "", a=g["summary"].get("accuracy"),
+                     b=sum(1 for p in g["plies"] if p["mine"] and p.get("brill")), gr=sum(1 for p in g["plies"] if p["mine"] and p.get("great")))
+               for g in games]
 
     # --- 최근 게임 / 최악의 실수
     avg_s = meta_get(con, "avg") if con is not None else None      # 평소 평균은 기간과 상관없이 전체 기간 것 (render_all 이 meta 에 둔다)
@@ -1760,6 +1764,12 @@ def coach_stats(games, con=None, n_examples=5):
             trend=trend_analysis(metric_series(games, "cat", key), "cat"),
             examples=[with_lines(con, mistake_rec(games[gi], p)) for gi, p in newest]))
     cats.sort(key=lambda c: -c["cost"])
+    dates = [s[0] for s in cats[0]["trend"]["series"]] if cats else []
+    for c in cats:   # 화면(app.js hydrateTrends)이 dates 와 vals 로 series 를 다시 만든다
+        t = c["trend"]
+        if [x[0] for x in t["series"]] == dates and all(x[2] == 1 for x in t["series"]):
+            t["vals"] = [x[1] for x in t["series"]]
+            del t["series"]
     early = [p for g in games for p in g["plies"] if p.get("cat") and p["move"] <= EARLY_MOVES]
     ec = Counter(p["cat"] for p in early)
     by_color = {}
@@ -1767,7 +1777,7 @@ def coach_stats(games, con=None, n_examples=5):
         gs = [g for g in games if g["my_color"] == c]
         by_color[c] = round(sum(1 for g in gs for p in g["plies"] if p.get("cat") and p["move"] <= EARLY_MOVES) / len(gs), 2) if gs else None
     return dict(n=total_n, games=n_games, per_game=round(total_n / n_games, 2), cost=round(total_cost), k=K,
-                threshold=MISTAKE_WP, early_moves=EARLY_MOVES,
+                threshold=MISTAKE_WP, early_moves=EARLY_MOVES, dates=dates,
                 cats=cats, focus=[c["key"] for c in cats if c["n"] >= 3][:3],
                 early=dict(n=len(early), per_game=round(len(early) / n_games, 2), per_game_by_color=by_color,
                            cats=[dict(key=k, n=v, cost=round(sum(p["wp_loss"] for p in early if p["cat"] == k))) for k, v in ec.most_common()]))

@@ -94,6 +94,22 @@ jobs:
             git rebase --abort >/dev/null 2>&1 || true
             echo "푸시 실패 (다음 반복에서 재시도)"; return 1
           }
+          # 새 코드를 당겨 온다. requirements.txt 가 바뀌면 다시 설치하고, 파이프라인·테스트가 바뀌면 단위 테스트를 돌려 실패하면 이전 커밋으로 되돌린다
+          # (잘못된 푸시가 실제 사이트에 닿지 않게). 같은 커밋으로는 한 번만 알린다.
+          badsha=""
+          pull_code() {
+            local before; before=$(git rev-parse HEAD)
+            if ! git pull -q --rebase origin main; then git rebase --abort >/dev/null 2>&1 || true; return; fi
+            local now; now=$(git rev-parse HEAD); [ "$now" = "$before" ] && return
+            local changed; changed=$(git diff --name-only "$before" "$now")
+            echo "$changed" | grep -qx 'requirements.txt' && pip install -q -r requirements.txt
+            if echo "$changed" | grep -qE '^(pipeline|render)\.py$|^tests/|^requirements\.txt$'; then
+              if python -m unittest discover -s tests >/dev/null 2>&1; then echo "새 코드 $now 테스트 통과"; else
+                echo "새 코드 $now 테스트 실패: $before 로 되돌림"; git reset -q --hard "$before"
+                if [ "$badsha" != "$now" ]; then badsha=$now; curl -s -o /dev/null -H "Title: chess pipeline 코드 테스트 실패" -H "Tags: warning" -H "Click: $RUN_URL" -d "푸시한 코드가 단위 테스트에 실패해 이전 코드로 계속 돕니다 ($now)." "https://ntfy.sh/$NTFY_TOPIC" || true; fi
+              fi
+            fi
+          }
           end=$(( SECONDS + (WATCH_MINUTES - 15) * 60 )); i=0; fails=0; pfails=0   # 마지막 반복이 길어도 6시간 작업 한도 안에 끝나도록 15분 여유
           echo "감시 시작: ${WATCH_MINUTES}분 동안 1분마다 확인 (10분마다 전체 확인, 5분마다 코드 갱신)"
           while [ $SECONDS -lt $end ]; do
@@ -116,7 +132,7 @@ jobs:
                 fi
               fi
             fi
-            if [ $((i % 5)) -eq 0 ] && [ "$need_push" -eq 0 ]; then git pull -q --rebase origin main || git rebase --abort >/dev/null 2>&1 || true; fi
+            if [ $((i % 5)) -eq 0 ] && [ "$need_push" -eq 0 ]; then pull_code; fi
             sleep 60
           done
           sync && python pipeline.py --send-queued || true

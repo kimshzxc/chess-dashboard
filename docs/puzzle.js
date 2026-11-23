@@ -22,8 +22,15 @@ const colorName=c=>c==='w'?'백':'흑';
    진행은 이 탭(sessionStorage)에만 둔다. 채점 기록·복습 일정·연속 일수에는 평소처럼 반영된다. */
 const CAT=new URLSearchParams(location.search).get('cat');
 const WIN=CAT==='win';     // 굳히기: 유리하던(+3 이상) 국면에서 무너진 수만 모은 묶음. 가장 큰 약점(유리한 판 마무리)을 겨냥한다
-const PRACTICE=WIN||!!(CAT&&CATS[CAT]);
-const catInfo=()=>WIN?{n:'굳히기 (유리할 때)',rule:'유리하면 기물을 교환해 단순화하고, 매 수 상대의 체크와 잡는 수부터 확인한다'}:catOf(CAT);
+/* 국면·시간 묶음: phase:opening|middlegame|endgame, clock (남은 시간 1분 아래). 통계가 지적하는 약점을 바로 연습한다 */
+const SETS={'phase:opening':{n:'오프닝 국면',rule:'오프닝에서는 전개와 킹 안전을 먼저 보고, 상대의 위협을 매 수 확인한다',f:p=>p.phase==='opening'},
+  'phase:middlegame':{n:'중반전 국면',rule:'중반전에서는 두기 전에 상대의 체크·잡는 수·위협을 한 번 훑는다',f:p=>p.phase==='middlegame'},
+  'phase:endgame':{n:'엔드게임 국면',rule:'엔드게임에서는 킹을 활동시키고 폰의 통과 가능성을 먼저 센다',f:p=>p.phase==='endgame'},
+  clock:{n:'시간 압박 (1분 아래)',rule:'시간이 적을수록 단순한 수를 고르고, 상대의 체크와 잡는 수만은 꼭 본다',f:p=>p.clock!=null&&p.clock<60}};
+const SET=CAT&&SETS[CAT]?CAT:null;
+const PRACTICE=WIN||!!SET||!!(CAT&&CATS[CAT]);
+const catInfo=()=>WIN?{n:'굳히기 (유리할 때)',rule:'유리하면 기물을 교환해 단순화하고, 매 수 상대의 체크와 잡는 수부터 확인한다'}:SET?SETS[SET]:catOf(CAT);
+const inSet=(p)=>WIN?p.win:SET?SETS[SET].f(p):p.cat===CAT;
 const COACH=await fetch('coach.json',{cache:'no-cache'}).then(r=>r.ok?r.json():null).catch(()=>null);
 const NCAT={}; for(const p of ALL) if(p.cat) NCAT[p.cat]=(NCAT[p.cat]||0)+1;
 
@@ -43,7 +50,7 @@ function buildDay(){
   return d;
 }
 function buildPractice(){
-  const pool=shuffled(ALL.filter(p=>WIN?p.win:p.cat===CAT),TODAY+CAT);
+  const pool=shuffled(ALL.filter(inSet),TODAY+CAT);
   const d={date:TODAY, ids:[], pz:{}, rv:{}, res:{}, idx:0, daily:0, cont:false, practice:CAT};
   for(const p of [...pool.filter(p=>!SEEN[p.id]), ...pool.filter(p=>SEEN[p.id]).sort((a,b)=>SEEN[a.id].localeCompare(SEEN[b.id]))]){ d.ids.push(p.id); d.pz[p.id]=p; if(REVIEW[p.id]) d.rv[p.id]=true; }
   d.daily=d.ids.length;
@@ -68,17 +75,17 @@ function ensureCurrent(){
   TD.ids.push(nx.id); TD.pz[nx.id]=nx; saveDay(); return true;
 }
 
-let SEL=null;
+let SEL=null, T0=0;   // T0: 지금 문제를 보여 준 시각 (푸는 데 걸린 시간)
 function headHTML(){
   let n=0, off=HIST[dkey(0)]?0:-1; while(HIST[dkey(off)]){ n++; off--; }
-  const tot=Object.values(HIST).reduce((a,h)=>[a[0]+h.ok,a[1]+h.n],[0,0]);
+  const tot=Object.values(HIST).reduce((a,h)=>[a[0]+h.ok,a[1]+h.n,a[2]+(h.s||0),a[3]+(h.sn||0)],[0,0,0,0]);
   const mx=Math.max(1,...[0,1,2,3,4,5,6].map(i=>(HIST[dkey(-i)]||{}).n||0));
   const week=[6,5,4,3,2,1,0].map(i=>{ const k=dkey(-i), h=HIST[k]; return `<div><i class="${h?'has':''}" style="height:${h?Math.max(8,Math.round(h.n/mx*36)):4}px"></i>${'일월화수목금토'[new Date(k+'T00:00:00Z').getUTCDay()]}</div>`; }).join('');
   const waiting=Object.keys(REVIEW).length;
-  let h=`<div class="card streakcard"><div><div class="sub">연속 풀이</div><div class="n">${n}<small>일</small></div><div class="sub">누적 정답 ${tot[0]} / ${tot[1]}${tot[1]?` (${Math.round(tot[0]/tot[1]*100)}%)`:''}${waiting?` · 복습 대기 ${waiting}개`:''}</div></div><div class="week">${week}</div></div>`;
+  let h=`<div class="card streakcard"><div><div class="sub">연속 풀이</div><div class="n">${n}<small>일</small></div><div class="sub">누적 정답 ${tot[0]} / ${tot[1]}${tot[1]?` (${Math.round(tot[0]/tot[1]*100)}%)`:''}${tot[3]?` · 평균 ${Math.round(tot[2]/tot[3])}초`:''}${waiting?` · 복습 대기 ${waiting}개`:''}</div></div><div class="week">${week}</div></div>`;
   const focus=(COACH&&COACH.focus)||[];
   const keys=Object.keys(NCAT).filter(k=>CATS[k]).sort((a,b)=>(focus.includes(b)-focus.includes(a))||NCAT[b]-NCAT[a]);
-  if(keys.length) h+=`<div class="pzmodes"><a class="${PRACTICE?'':'on'}" href="puzzle.html">오늘의 10문제</a><a class="win ${WIN?'on':''}" href="puzzle.html?cat=win">굳히기 ${ALL.filter(p=>p.win).length}</a>${keys.map(k=>`<a class="${k===CAT?'on':''}" href="puzzle.html?cat=${k}">${esc(catOf(k).n)} ${NCAT[k]}</a>`).join('')}</div>`;
+  if(keys.length) h+=`<div class="pzmodes"><a class="${PRACTICE?'':'on'}" href="puzzle.html">오늘의 10문제</a><a class="win ${WIN?'on':''}" href="puzzle.html?cat=win">굳히기 ${ALL.filter(p=>p.win).length}</a>${Object.entries(SETS).map(([k,s])=>{ const n=ALL.filter(s.f).length; return n?`<a class="set ${k===SET?'on':''}" href="puzzle.html?cat=${k}">${s.n.replace(/ \(.*\)| 국면/,'')} ${n}</a>`:''; }).join('')}${keys.map(k=>`<a class="${k===CAT?'on':''}" href="puzzle.html?cat=${k}">${esc(catOf(k).n)} ${NCAT[k]}</a>`).join('')}</div>`;
   const inDaily=TD.idx<TD.daily, vals=Object.values(TD.res);
   if(PRACTICE) return h+`<div class="rule" style="margin-top:12px"><span>두기 전에</span>${esc(catInfo().rule)}</div><div class="prog"><div><b>${esc(catInfo().n)}</b> <span class="sub">유형 연습 ${Math.min(TD.idx+1,TD.daily)} / ${TD.daily} · 정답 ${vals.filter(x=>x==='ok').length} / ${vals.length}</span></div></div>`;
   h+=`<div class="prog"><div><b>${inDaily?'오늘의 퍼즐':'추가 퍼즐'}</b> <span class="sub">${inDaily?`${TD.idx+1} / ${TD.daily}`:`오늘 정답 ${vals.filter(x=>x==='ok').length} / ${vals.length}`}</span></div>`;
@@ -105,7 +112,7 @@ function render(){
   $('#main').innerHTML=h;
   pzBar(w.cp_before);
   if(answered()) showAnswer((TD.mv||{})[w.id],true);
-  else { $('#pzacts').innerHTML=`<span class="btn" id="giveup">모르겠어요</span>`; drawBoard(); }
+  else { $('#pzacts').innerHTML=`<span class="btn" id="giveup">모르겠어요</span>`; drawBoard(); T0=Date.now(); }
 }
 /* 판 왼쪽 평가 막대. cp 는 둘 쪽(나) 기준이라 백 기준으로 바꿔 넣는다 */
 function pzBar(cp){ const w=cur(); setEvalBar($('#pzeval'), cp==null?null:(w.mover==='w'?cp:-cp), w.color==='b'); }
@@ -139,8 +146,9 @@ function answer(uci){
   const w=cur();
   const accepted=new Set([w.best_uci.slice(0,4), ...(w.alts||[]).map(a=>a.uci.slice(0,4))]);   // 최선 수와, 승률 차이가 작아 같이 인정하는 수
   const ok=uci!==null&&accepted.has(uci.slice(0,4));
-  TD.res[w.id]=ok?'ok':'ng'; (TD.mv=TD.mv||{})[w.id]=uci; saveDay();
-  const h=HIST[TODAY]||{ok:0,n:0}; h.n++; if(ok) h.ok++; HIST[TODAY]=h; save('puzzle-history',HIST);
+  const sec=T0?Math.min(600,Math.round((Date.now()-T0)/1000)):null;
+  TD.res[w.id]=ok?'ok':'ng'; (TD.mv=TD.mv||{})[w.id]=uci; if(sec!=null) (TD.sec=TD.sec||{})[w.id]=sec; saveDay();
+  const h=HIST[TODAY]||{ok:0,n:0}; h.n++; if(ok) h.ok++; if(sec!=null){ h.s=(h.s||0)+sec; h.sn=(h.sn||0)+1; } HIST[TODAY]=h; save('puzzle-history',HIST);
   if(WIN){ const pw=load('puzzle-win',null); const d=pw&&pw.date===TODAY?pw:{date:TODAY,n:0,ok:0}; d.n++; if(ok) d.ok++; save('puzzle-win',d); }   // 홈의 '오늘' 줄이 센다
   SEEN[w.id]=TODAY; const sk=Object.keys(SEEN); if(sk.length>MAX_SEEN) sk.sort((a,b)=>SEEN[a].localeCompare(SEEN[b])).slice(0,sk.length-MAX_SEEN).forEach(k=>delete SEEN[k]); save('puzzle-seen',SEEN);
   const r=REVIEW[w.id];
@@ -166,7 +174,8 @@ function showAnswer(uci,restored){
   else if(alt) msg=`<span class="ic">정답</span><b>${esc(alt.san)}</b> 도 좋은 수입니다. 엔진의 첫째 선택은 <b>${esc(w.best)}</b> 이지만 차이가 작습니다. ${lost}.`;
   else if(ok) msg=`<span class="ic">정답</span><b>${esc(w.best)}</b> 가 가장 좋은 수입니다. ${lost}.`;
   else msg=`<span class="ic">오답</span>가장 좋은 수는 <b>${esc(w.best)}</b> 입니다. ${lost} (${ev(w.cp_before)} → ${ev(w.cp_after)}).`;
-  if(uci) msg+=`<div style="margin-top:4px">내가 둔 <span class="mono">${esc(uciSan(w,uci))}</span> 뒤 ${wpChange(w.cp_before,mcp)||'<span class="sub">승률 계산 없음</span>'}</div>`;
+  if(uci) msg+=`<div style="margin-top:4px">내가 둔 <span class="mono">${esc(uciSan(w,uci))}</span> 뒤 ${wpChange(w.cp_before,mcp)||'<span class="sub">승률 계산 없음</span>'}${(TD.sec||{})[w.id]!=null&&!restored?` <span class="sub">· ${TD.sec[w.id]}초</span>`:''}</div>`;
+  msg+=otherMoves(w,uci);
   const others=(w.alts||[]).filter(a=>a!==alt).map(a=>esc(a.san));
   if(others.length) msg+=`<div class="sub" style="margin-top:6px">${alt?'그 밖에':'같이'} 정답으로 인정되는 수: ${others.join(', ')}</div>`;
   if(w.cat) msg+=`<div class="sub" style="margin-top:8px">${catTag(w.cat,COACH&&COACH.focus&&COACH.focus.includes(w.cat)?'rep':'')} 두기 전에: ${esc(catOf(w.cat).rule)}</div>`;
@@ -178,6 +187,16 @@ function showAnswer(uci,restored){
   $('#pzacts').innerHTML=`<a class="btn" href="game.html?id=${gameId(w.url)}&ply=${w.ply}">게임에서 보기</a><span class="btn on" id="next">다음 퍼즐 ›</span>`;
   $('#pzhead').innerHTML=headHTML();
   if(!restored) $('#next').scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+/* 후보 수들의 평가표: 최선·같이 좋은 수·실전 수·내가 둔 수와, 모든 수 평가(moves)에서 그다음으로 좋은 수들. 아깝게 틀린 수가 왜 아까운지 보인다 */
+function otherMoves(w,uci){
+  if(!w.moves) return '';
+  const rows=new Map(); const add=(u,cp,tag)=>{ u=u.slice(0,4); if(!rows.has(u)) rows.set(u,{u,cp,tags:[]}); if(tag) rows.get(u).tags.push(tag); };
+  add(w.best_uci,w.cp_before,'최선'); (w.alts||[]).forEach(a=>add(a.uci,a.cp!=null?Math.min(a.cp,w.cp_before):w.cp_before,'같이 정답')); add(w.uci,w.cp_after,'실전'); if(uci) add(uci,moveCp(w,uci),'내 답');
+  Object.entries(w.moves).sort((a,b)=>b[1]-a[1]).slice(0,6).forEach(([u,cp])=>add(u,Math.min(cp,w.cp_before)));
+  const list=[...rows.values()].filter(r=>r.cp!=null||r.tags.includes('내 답')).sort((a,b)=>(b.cp??-1e9)-(a.cp??-1e9)).slice(0,7);   // 내 답은 평가가 없어도(얕은 평가에 빠진 수) 보여 준다
+  if(list.length<2) return '';
+  return `<details class="omoves"><summary>다른 수들은 어땠나 (엔진 평가)</summary><table>${list.map(r=>`<tr class="${r.tags.includes('내 답')?'me':''}"><td class="mono">${esc(uciSan(w,r.u))}</td><td>${r.cp==null?'<span class="sub">평가 없음</span>':ev(r.cp)}</td><td class="sub">${r.cp==null?'':(wpChange(w.cp_before,r.cp)||'')}</td><td class="sub">${r.tags.join(' · ')}</td></tr>`).join('')}</table></details>`;
 }
 /* 둔 수의 표기: 최선·실전·비슷한 정답은 저장된 SAN, 나머지는 기물 글자+칸으로 간단히 */
 function uciSan(w,uci){

@@ -1,10 +1,16 @@
 /* 대시보드. shared.js(공용 함수) 다음에 module 로 로드된다. */
 let PIECES, DATA, LAST_FETCH=Date.now();
-const getJSON=async(u)=>{ const r=await fetch(u,{cache:'no-cache'}); if(!r.ok) throw new Error(`${u} ${r.status}`); return r.json(); };
+let FROM_CACHE=false;   // 서비스 워커가 네트워크 대신 캐시로 답했는지 (6초 초과·오프라인). getJSON 보다 먼저 선언
+const getJSON=async(u)=>{ const r=await fetch(u,{cache:'no-cache'}); if(!r.ok) throw new Error(`${u} ${r.status}`); if(r.headers.get('x-sw-cache')) FROM_CACHE=true; return r.json(); };
 try{ [PIECES, DATA] = await Promise.all([fetch('pieces.svg').then(r=>{ if(!r.ok) throw new Error(`pieces.svg ${r.status}`); return r.text(); }), getJSON('stats.json')]); }
 catch(e){ loadError(e); throw e; }
 document.body.insertAdjacentHTML('afterbegin', PIECES);
 document.title = `${DATA.username} 래피드 분석`;
+/* coach.cats[].trend 는 날짜 열을 coach.dates 에 한 번만 담아 온다 (파일 크기). 여기서 series 로 되돌린다 */
+function hydrateTrends(S){ const co=S&&S.coach; if(!co||!co.dates) return; for(const c of co.cats||[]){ const t=c.trend; if(t&&!t.series&&t.vals) t.series=co.dates.map((d,i)=>[d,t.vals[i],1]); } }
+Object.values(DATA.windows).forEach(hydrateTrends);
+/* 서비스 워커가 캐시로 답했으면 옛 데이터라는 표시 */
+function cacheNote(){ const el=document.getElementById('cachenote'); if(el) el.hidden=!FROM_CACHE; }
 let W = 'all';
 $('#tpanel-slot').innerHTML=themePanel(); applyMode();
 
@@ -214,7 +220,7 @@ function routineLine(){
   const items=[['교본',Object.values(ls('learn-done')||{}).includes(day),'learn.html?next=1'],
     [`퍼즐 ${pn}/${pt}`,pt>0&&pn>=pt,'puzzle.html'],
     [`굳히기 ${Math.min(wn,WIN_N)}/${WIN_N}`,wn>=WIN_N,'puzzle.html?cat=win'],
-    ['오프닝',Object.values(ls('train-done')||{}).some(o=>Object.values(o||{}).some(l=>l&&l.last===day)),'train.html?next=1']];
+    [`오프닝${(dueN=>dueN?` 복습 ${dueN}`:'')(Object.values(ls('train-done')||{}).flatMap(o=>Object.values(o||{})).filter(l=>l&&l.due&&l.due<=day).length)}`,Object.values(ls('train-done')||{}).some(o=>Object.values(o||{}).some(l=>l&&l.last===day)),'train.html?next=1']];
   return `<div class="routine" id="routine"><span class="k">오늘</span>${items.map(([n,d,u])=>`<a class="${d?'done':''}" href="${u}"><i>${d?'✓':''}</i>${n}</a>`).join('')}</div>`;
 }
 window.addEventListener('pageshow',()=>{ const el=document.getElementById('routine'); if(el) el.outerHTML=routineLine(); });
@@ -235,6 +241,34 @@ function setRule(id){
   try{ localStorage.setItem(RULE_K,JSON.stringify(r)); }catch(e){}
   const el=document.getElementById('s-rule'); if(el) el.outerHTML=ruleSection(S);
 }
+/* ---------- 게임 탭: 전체 게임 (log) 필터·검색 ---------- */
+const GF={q:'',cl:'',r:'',sp:false,n:40};
+function gameRows(S){
+  const q=GF.q.trim().toLowerCase();
+  return (S.log||[]).slice().reverse().filter(g=>(!GF.cl||g.cl===GF.cl)&&(!GF.r||g.r===GF.r)&&(!GF.sp||g.b||g.gr)
+    &&(!q||(g.o||'').toLowerCase().includes(q)||(g.e||'').toLowerCase().includes(q)||(g.d||'').includes(q)));
+}
+function allGamesSection(S){
+  if(!S.log||!S.log.length||S.log[0].o===undefined) return '';
+  return `<section id="s-all" data-view="games"><h2>전체 게임<small>${S.log.length}판 · 상대·오프닝·날짜로 찾기</small></h2>
+    <div class="gfilter"><input type="search" id="gf-q" placeholder="상대 이름, 오프닝, 날짜(2026-11)" value="${esc(GF.q)}" autocomplete="off">
+      <div class="chips">${[['cl','w','백'],['cl','b','흑'],['r','W','승'],['r','D','무'],['r','L','패'],['sp','1','탁월·대단한 수']].map(([k,v,n])=>`<span class="chip sel ${k==='sp'?(GF.sp?'on':''):(GF[k]===v?'on':'')}" data-gf="${k}" data-v="${v}">${n}</span>`).join('')}</div></div>
+    <div class="card" id="gf-list">${gameListHTML(S)}</div></section>`;
+}
+function gameListHTML(S){
+  const rows=gameRows(S); if(!rows.length) return '<div class="empty">맞는 게임이 없습니다.</div>';
+  const show=rows.slice(0,GF.n);
+  return show.map(g=>`<a class="grow gl" href="game.html?id=${g.id}"><div class="res ${g.r}">${g.r==='W'?'승':g.r==='L'?'패':'무'}</div><div class="m"><div class="h"><b>${g.cl==='w'?'백':'흑'} vs ${esc(g.o)}</b><span class="s dt">${g.d.slice(5)} ›</span></div>
+    <div class="s">${esc(g.e)}${g.a!=null?` · 정확도 ${g.a}%`:''}${g.b?` · <span class="cls brill">탁월 ${g.b}</span>`:''}${g.gr?` · <span class="cls great">대단 ${g.gr}</span>`:''}</div></div></a>`).join('')
+    +(rows.length>GF.n?`<div class="more"><span class="btn" data-gf-more>더 보기 (${rows.length-GF.n}판 남음)</span></div>`:'');
+}
+document.addEventListener('input',(e)=>{ if(e.target.id!=='gf-q') return; GF.q=e.target.value; GF.n=40; const S=DATA.windows[W]; const l=document.getElementById('gf-list'); if(l&&S) l.innerHTML=gameListHTML(S); });
+document.addEventListener('click',(e)=>{
+  const c=e.target.closest('[data-gf]'); const m=e.target.closest('[data-gf-more]'); if(!c&&!m) return;
+  if(c){ const k=c.dataset.gf; if(k==='sp') GF.sp=!GF.sp; else GF[k]=GF[k]===c.dataset.v?'':c.dataset.v; GF.n=40; }
+  else GF.n+=40;
+  const S=DATA.windows[W]; const sec=document.getElementById('s-all'); if(sec&&S){ sec.outerHTML=allGamesSection(S); if(c) document.getElementById('gf-q')?.blur(); }
+});
 function ruleSection(S){
   const log=S.log||[]; if(!log.length) return '';
   const st=ruleState(), rule=st&&ruleOf(st.id);
@@ -254,10 +288,17 @@ function ruleSection(S){
     body=`<div class="rt">${esc(rule.n)}</div><div class="sub">${esc(rule.d)} · ${st.set.slice(5)}부터</div>
       <div class="rseq"><span class="seq" role="img" aria-label="규칙 뒤 ${n}판 중 ${hitG}판에서 발생">${shown.map(g=>`<i class="${ruleHits(rule,g)>0?'hit':''}" title="${g.d}"></i>`).join('')}</span></div>
       <div class="v">${n?`규칙 뒤 <b>${n}판 중 ${hitG}판</b>에서 나옴 · 판당 ${pg.toFixed(2)}회`:'규칙을 정한 뒤 둔 판이 아직 없습니다.'}${bpg!=null?` · 규칙 전 ${before.length}판은 판당 ${bpg.toFixed(2)}회`:''} ${chip}</div>
+      ${n&&before.length?ruleHist(rule,before,after):''}
       ${n<RULE_N?`<div class="prog"><i style="width:${(n/RULE_N*100).toFixed(0)}%"></i></div><div class="sub">${RULE_N}판을 채우면 전과 비교해 판단합니다 (${n}/${RULE_N})</div>`:''}
       <div class="links"><span class="btn" data-pickrule>규칙 바꾸기</span><span class="btn" data-setrule="${rule.id}">다시 시작</span></div>`;
   }
   return `<section id="s-rule" data-view="home"><h2>이번 규칙 하나<small>한 번에 하나만 바꾼다 · 기록은 이 기기에 남습니다</small></h2><div class="card rulecard">${body}</div></section>`;
+}
+/* 규칙 전·후 판별 분포: 한 판에 0·1·2·3회 이상 나온 판의 비율. 평균만 보면 한두 판의 몰림을 못 가른다 */
+function ruleHist(rule,before,after){
+  const bin=(gs)=>{ const b=[0,0,0,0]; for(const g of gs) b[Math.min(3,ruleHits(rule,g))]++; return b.map(x=>gs.length?x/gs.length*100:0); };
+  const B=bin(before), A=bin(after), lab=['0회','1회','2회','3회+'];
+  return `<div class="rhist"><div class="sub">판당 발생 횟수 분포 (전 ${before.length}판 → 후 ${after.length}판)</div><table>${lab.map((l,i)=>`<tr><th>${l}</th><td><i style="width:${B[i].toFixed(0)}%" class="b"></i><span>${B[i].toFixed(0)}%</span></td><td><i style="width:${A[i].toFixed(0)}%" class="a"></i><span>${A[i].toFixed(0)}%</span></td></tr>`).join('')}</table></div>`;
 }
 function openRulePicker(){
   const cur=ruleState(), S=DATA.windows[W], co=coachOf(S);
@@ -502,7 +543,7 @@ function render(){
   document.body.dataset.w=W;
   document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.w===W));
   $('#title').textContent = `${DATA.username} · 래피드 분석`;
-  $('#foot').innerHTML = `마지막 갱신 ${DATA.generated} (KST${ageTxt(DATA.generated)}) · Stockfish 19 depth ${(DATA.meta||{}).depth||14}, 수순 depth ${(DATA.meta||{}).pv_depth||16} · 게임이 끝나면 1~2분 안에 자동 갱신<br>기물: maestro (sadsnake1, CC BY-NC-SA 4.0), cburnett (GPLv2+), merida (GPLv2+), alpha (Eric Bentzen), california (Jerry S., CC BY-NC-SA 4.0)`;
+  $('#foot').innerHTML = `<div id="cachenote" class="cachenote" ${FROM_CACHE?'':'hidden'}>네트워크가 느리거나 끊겨 마지막으로 받아 둔 데이터를 보여 줍니다.</div>마지막 갱신 ${DATA.generated} (KST${ageTxt(DATA.generated)}) · Stockfish 19 depth ${(DATA.meta||{}).depth||14}, 수순 depth ${(DATA.meta||{}).pv_depth||16} · 게임이 끝나면 1~2분 안에 자동 갱신<br>기물: maestro (sadsnake1, CC BY-NC-SA 4.0), cburnett (GPLv2+), merida (GPLv2+), alpha (Eric Bentzen), california (Jerry S., CC BY-NC-SA 4.0)`;
   if(S===undefined){ $('#subtitle').textContent=''; $('#main').innerHTML=`<div class="empty">이 기간의 통계를 불러오지 못했습니다. <a href="" onclick="location.reload();return false">다시 시도</a></div>`; return; }
   if(!S){ $('#subtitle').textContent=''; $('#main').innerHTML='<div class="empty">이 기간에 분석된 래피드 게임이 없습니다.</div>'; return; }
   const o=S.overview, t=S.time, c=S.conversion, tc=S.tactics;
@@ -555,6 +596,7 @@ function render(){
   });
   if(S.recent.length>RECENT_N) h+=`</div><div class="more"><span class="btn" data-fold="fold-recent" data-unit="판">나머지 ${S.recent.length-RECENT_N}판 보기</span></div>`;
   h+='</div></section>';
+  h+=allGamesSection(S);
   h+=subnav('mistakes');
   h+=catsSection(S);
   // 최악의 실수
@@ -575,7 +617,7 @@ function render(){
     <div class="tile"><div class="k">30초 미만으로 끝난 판</div><div class="v">${t.low_clock_games.n}</div><div class="d">그중 패배 ${t.low_clock_games.losses}</div></div>
   </div>`;
   const bc=t.blunder_by_clock, bs=t.blunder_by_spent; const mx=Math.max(...bc.map(b=>b.rate),...bs.map(b=>b.rate),1);
-  h+=`<div class="card"><div class="sub" style="margin-bottom:6px">남은 시간별 대실수율</div>${bars(bc.map(b=>({label:b.label,me:b.rate,fmt:pct,note:`(${b.moves}수)`})),mx)}</div>`;
+  h+=`<div class="card"><div class="sub" style="margin-bottom:6px">남은 시간별 대실수율</div>${bars(bc.map(b=>({label:b.label,me:b.rate,fmt:pct,note:`(${b.moves}수)`})),mx)}<div class="links" style="margin-top:8px"><a class="btn" href="puzzle.html?cat=clock">시간 압박 퍼즐 (1분 아래) ›</a></div></div>`;
   h+=`<div class="card"><div class="sub" style="margin-bottom:6px">한 수에 쓴 시간별 대실수율</div>${bars(bs.map(b=>({label:b.label,me:b.rate,fmt:pct,note:`(${b.moves}수, 정확도 ${b.accuracy}%)`})),mx)}</div></section>`;
   // 틸트·세션
   const tl=S.tilt;
@@ -638,7 +680,7 @@ document.addEventListener('click',(e)=>{
 /* 최근 30일·7일 통계는 stats-30d.json / stats-7d.json 에 따로 있어 탭을 누를 때 받는다 (첫 화면은 전체 기간만) */
 async function loadWindow(w){
   if(w in DATA.windows) return;
-  try{ const r=await fetch(`stats-${w}.json`,{cache:'no-cache'}); if(r.ok) DATA.windows[w]=(await r.json()).window; else if(r.status===404) DATA.windows[w]=null; }
+  try{ const r=await fetch(`stats-${w}.json`,{cache:'no-cache'}); if(r.ok){ DATA.windows[w]=(await r.json()).window; hydrateTrends(DATA.windows[w]); if(r.headers.get('x-sw-cache')) FROM_CACHE=true; } else if(r.status===404) DATA.windows[w]=null; }
   catch(e){}   // 못 받으면 undefined 로 남겨 render 가 '없음'이 아니라 '불러오지 못함'을 보인다
 }
 document.querySelectorAll('#tabs button').forEach(b=>b.addEventListener('click',async()=>{closeSheet();const w=b.dataset.w;W=w;try{localStorage.setItem('chess-window',W)}catch(e){}; b.classList.add('on'); await loadWindow(w); if(W!==w) return; render();window.scrollTo(0,0)}));
@@ -654,6 +696,6 @@ await loadWindow(W); render();
 document.addEventListener('visibilitychange',async()=>{
   if(document.visibilityState!=='visible'||Date.now()-LAST_FETCH<5*60e3) return;
   LAST_FETCH=Date.now();
-  try{ const d=await getJSON('stats.json'); if(d.generated===DATA.generated) return;
-    DATA=d; await loadWindow(W); closeSheet(); render(); }catch(e){}
+  try{ FROM_CACHE=false; const d=await getJSON('stats.json'); if(d.generated===DATA.generated){ cacheNote(); return; }
+    DATA=d; Object.values(DATA.windows).forEach(hydrateTrends); await loadWindow(W); closeSheet(); render(); }catch(e){}
 });

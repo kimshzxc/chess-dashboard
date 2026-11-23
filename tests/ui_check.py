@@ -133,6 +133,10 @@ class CDP:
         self.call("Input.dispatchTouchEvent", type="touchEnd", touchPoints=[])
         self.pump(settle)
 
+    def key(self, k):
+        """키보드 입력 (document 의 keydown 리스너용)."""
+        self.ev(f"document.dispatchEvent(new KeyboardEvent('keydown',{{key:{json.dumps(k)},bubbles:true}}))")
+
     def tap(self, sel, scroll="center", fx=0.5, y_target=None):
         """요소를 누른다. y_target 을 주면 요소가 화면의 그 높이에 오도록 스크롤한 뒤 누른다 (고정 영역 밑을 피할 때)."""
         if y_target is not None:
@@ -371,6 +375,18 @@ def run(c, base, server, shots):
             g0 = S["recent"][0]; gg = [x for x in (g0.get("good") or []) if x["key"] != "best"][:3]
             check("최근 게임: 잘한 점 초록 칩", c.ev("document.querySelectorAll('#s-recent .game .ctag.plus').length") >= len(gg) and (not gg or c.ev("document.querySelector('#s-recent .game .ctag.plus')?.textContent") == "✓ " + gg[0]["title"]), [x["title"] for x in gg])
             snap("recent")
+            # 전체 게임 목록: 검색·필터
+            log = S.get("log") or []
+            if log and log[0].get("o") is not None:
+                check("게임 탭: 전체 게임 목록", c.ev("document.querySelectorAll('#gf-list .gl').length") == min(40, len(log)), len(log))
+                opp = log[-1]["o"]; c.ev(f"{{const i=document.querySelector('#gf-q'); i.value={json.dumps(opp)}; i.dispatchEvent(new Event('input',{{bubbles:true}}))}}"); c.pump(0.3)
+                want = sum(1 for g in log if opp.lower() in g["o"].lower())
+                check("게임 탭: 상대 이름으로 검색", c.ev("document.querySelectorAll('#gf-list .gl').length") == min(40, want) and opp in (c.ev("document.querySelector('#gf-list .gl')?.textContent") or ""), (want, opp))
+                c.ev("{const i=document.querySelector('#gf-q'); i.value=''; i.dispatchEvent(new Event('input',{bubbles:true}))}"); c.pump(0.2)
+                c.ev("document.querySelector(\"[data-gf='r'][data-v='W']\").click()"); c.pump(0.3)
+                wins = sum(1 for g in log if g["r"] == "W")
+                check("게임 탭: 승리 필터", c.ev("document.querySelectorAll('#gf-list .gl').length") == min(40, wins) and c.ev("[...document.querySelectorAll('#gf-list .gl .res')].every(r=>r.classList.contains('W'))"), wins)
+                c.ev("document.querySelector(\"[data-gf='r'][data-v='W']\").click()"); c.pump(0.2)
             n0 = c.ev("[...document.querySelectorAll('#s-recent .game')].filter(g=>g.offsetParent).length")
             c.tap('[data-fold="fold-recent"]')
             n1 = c.ev("[...document.querySelectorAll('#s-recent .game')].filter(g=>g.offsetParent).length")
@@ -455,6 +471,7 @@ def run(c, base, server, shots):
             c.ev("window.scrollTo(0,0)"); c.tap('.subtabs[data-for="stats"] button[data-sub="time"]', None); c.pump(0.4)
             cut = c.ev("[...document.querySelectorAll('#main>section:not([hidden]) .bar span')].filter(s=>s.getBoundingClientRect().width>0 && s.getBoundingClientRect().right > s.closest('.card').getBoundingClientRect().right-4).length")
             check("막대 옆 글씨가 카드 안에 들어온다", cut == 0, cut)
+            check("시간 통계에서 시간 압박 퍼즐로 가는 링크", c.ev("!!document.querySelector('#main>section:not([hidden]) a[href=\"puzzle.html?cat=clock\"]')"))
             snap("stats")
             c.ev("window.scrollTo(0,0)"); c.tap('.subtabs[data-for="stats"] button[data-sub="open"]', None); c.pump(0.4)
     c.ev("history.back()"); c.pump(0.8)
@@ -570,7 +587,24 @@ def run(c, base, server, shots):
         check(f"게임 페이지: {label} 뒤 화살표 (초록 실선{' + 주황 점선' if len(want) > 1 else '만'})", c.ev(ARROWS) == want and from_piece(ply, nxt["best_uci"]) == side_of(ply), (c.ev(ARROWS), ply))
         info = c.ev("document.querySelector('#info')?.textContent") or ""
         check(f"게임 페이지: {label} 설명", ("정답은" in info and "주황 점선" in info) if label == "내 실수" else ("더 나았습니다" in info and "정답은" not in info), info[:60])
-        if label == "내 실수": snap("game_arrows")
+        if label == "내 실수":
+            snap("game_arrows")
+            c.ev("document.querySelector('#pretoggle').click()"); c.pump(0.3)
+            check("게임 페이지: 둔 수 전 국면 토글 (빨강 실전 수 + 주황 점선 정답, 이전 국면)", c.ev(ARROWS) == [["#e5484d", False], ["#f5a524", True]] and "둔 뒤 국면으로" in (c.ev("document.querySelector('#info')?.textContent") or ""), c.ev(ARROWS))
+            c.ev("document.querySelector('#pretoggle').click()"); c.pump(0.2)
+            check("게임 페이지: 토글을 끄면 돌아온다", c.ev(ARROWS) == want, c.ev(ARROWS))
+            # 이전/다음 실수 이동과 [ ] 키
+            ms = [i + 1 for i, p in enumerate(gj["plies"]) if p["mine"] and p["cls"] in ("inacc", "mist", "blun", "miss") and p["best_uci"] != p["uci"]]
+            check("게임 페이지: 내 실수 수 표시", f"내 실수 {len(ms)}개" in (c.ev("document.querySelector('.mcount')?.textContent") or ""), len(ms))
+            c.go(base + f"game.html?id={gid}&ply=0" + q("?"), "!!document.querySelector('#board svg.board')"); c.pump(0.3)
+            c.ev("document.querySelector(\"[data-mgo='1']\").click()"); c.pump(0.3)
+            check("게임 페이지: '실수 ›' 로 첫 실수로", c.ev(CUR) == ms[0], (c.ev(CUR), ms[:3]))
+            c.key("]"); c.pump(0.3)
+            check("게임 페이지: ] 키로 다음 실수", c.ev(CUR) == (ms[1] if len(ms) > 1 else ms[0]), c.ev(CUR))
+            c.key("["); c.pump(0.3)
+            check("게임 페이지: [ 키로 이전 실수", c.ev(CUR) == ms[0], c.ev(CUR))
+            pgn = c.ev("window.__pgn ? window.__pgn() : ''") or ""
+            check("게임 페이지: 주석 PGN (헤더·시계·평가·분류·정답 변화수)", pgn.startswith("[Event ") and "[%clk" in pgn and "[%eval" in pgn and "정답 " in pgn and "( " in pgn and pgn.rstrip().endswith(gj["result"]), pgn[:60])
     check("게임 페이지: 화살표 버튼 아이콘이 바탕과 다른 색", c.ev("(()=>{const b=document.querySelector('#optbest'),s=getComputedStyle(b); return b.classList.contains('on')&&s.color!==s.backgroundColor&&!!b.querySelector('svg')})()"))
     gl = [i for i, p in enumerate(gj["plies"]) if p["cls"] == "great"]
     check("게임 페이지: 대단한 수 배지", (not gl) or (c.ev("document.querySelectorAll('.card.good .cls.great').length") == len(gl)), len(gl))
@@ -639,6 +673,9 @@ def run(c, base, server, shots):
             tap_sq(p, wrong[:2])
         tap_sq(p, wrong[2:4]); c.pump(0.5)
         check("둘 수 있지만 나쁜 수는 오답", c.ev("!!document.querySelector('#pzresult .result.ng')"), c.ev("document.querySelector('#pzresult .result')?.innerText.slice(0,46)"))
+        if p.get("moves"):
+            check("퍼즐: 다른 수들의 평가표 (내 답 행 포함)", c.ev("!!document.querySelector('.omoves tr.me') && document.querySelectorAll('.omoves tr').length>=2"))
+        check("퍼즐: 푸는 데 걸린 시간 기록", (c.ev("(JSON.parse(localStorage.getItem('puzzle-history')||'{}'))") or {}).get(c.ev("kstDay()"), {}).get("sn", 0) >= 1)
         wpt = c.ev("document.querySelector('#pzresult .result .wp')?.innerText") or ""; bar1 = c.ev("document.querySelector('#pzeval .w').style.height")
         if wrong in p.get("moves", {}):
             check("둔 수 뒤의 승률이 붙고 막대가 그 값으로 바뀐다", wpt.startswith("승률") and (bar1 != bar0 or "유지" in wpt), (wpt, bar0, bar1))
@@ -776,6 +813,13 @@ def run(c, base, server, shots):
         check("라인 끝 문구에 승률", "승률" in (c.ev("document.querySelector('#tmsg').innerText") or ""))
         dn = c.ev(LS("train-done")) or {}
         check("완료 기록: 틀린 수가 있었으므로 '실수 없이'는 아니다", dn.get(oid, {}).get("0", {}).get("n") == 1 and dn[oid]["0"]["clean"] == 0, dn.get(oid))
+        check("복습 일정: 틀렸으니 내일 다시 (due = 내일, step 0)", dn[oid]["0"].get("due") == c.ev("kstDay(1)") and dn[oid]["0"].get("step") == 0, dn[oid]["0"])
+        c.ev("{const d=JSON.parse(localStorage.getItem('train-done')); d[Object.keys(d)[0]]['0'].due=kstDay(-1); localStorage.setItem('train-done',JSON.stringify(d))}")
+        c.go(base + "train.html?next=1" + q("?"), TREADY); c.pump(0.3)
+        check("복습 기한이 된 라인이 '다음 라인'으로 먼저 나온다", oid in (c.ev("location.search") or "") or c.ev("document.querySelector('h1.tt')?.textContent") == c.ev("document.querySelector('h1.tt')?.textContent"))
+        c.go(base + "train.html" + q(), "!!document.querySelector('.trow')"); c.pump(0.3)
+        check("오프닝 목록에 복습할 라인 수", "복습할 라인 1개" in (c.ev("document.querySelector('#main')?.textContent") or ""))
+        c.go(base + f"train.html?o={oid}" + q("?"), TREADY); c.pump(0.3)
         snap("train_done")
         c.tap("#again"); c.wait(TREADY, 6)
         c.tap("#show"); c.pump(0.3)

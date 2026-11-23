@@ -57,6 +57,23 @@ def blob_sha(data):
     return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
 
 
+SKIP_DIRS = {".git", "venv", "engine", "__pycache__", "data", "node_modules"}
+SKIP_FILES = (".env", "*.log", "*.tmp", "*.pyc", ".DS_Store")
+
+
+def local_files():
+    """저장소에 들어갈 만한 로컬 파일 (생성물·비밀·가상환경 제외), 저장소 상대 경로."""
+    import fnmatch
+    out = []
+    for d, dirs, files in os.walk(ROOT):
+        dirs[:] = [x for x in dirs if x not in SKIP_DIRS and not (os.path.relpath(os.path.join(d, x), ROOT) == "docs/games")]
+        for f in files:
+            if any(fnmatch.fnmatch(f, pat) or f.startswith(".env") for pat in SKIP_FILES):
+                continue
+            out.append(os.path.relpath(os.path.join(d, f), ROOT).replace(os.sep, "/"))
+    return sorted(out)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("files", nargs="*")
@@ -77,6 +94,9 @@ def main():
                 print("저장소에만 있음 ", path)
             elif blob_sha(open(local, "rb").read()) != sha:
                 print("다름           ", path)
+        for path in local_files():
+            if path not in remote and not path.startswith(GENERATED):
+                print("로컬에만 있음  ", path)
         return
     if not a.message or not (a.files or a.delete):
         ap.error("-m 메시지와 올릴 파일(또는 --delete)이 필요합니다")

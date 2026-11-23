@@ -233,6 +233,14 @@ h2 small{max-width:46ch}
 .tierrow .tb{display:inline-flex;align-items:center;gap:4px;padding:1px 7px 1px 3px;border-radius:999px;background:var(--surface2);border:1px solid var(--line)}
 .tierrow .tb b{color:var(--text);font-size:12px}.tierrow .tb svg{display:block}
 .tierrow .dim{color:var(--muted)}
+/* 전체 게임 필터 */
+.gfilter{margin:0 0 10px}.gfilter input{width:100%;box-sizing:border-box;padding:10px 12px;border-radius:12px;border:1px solid var(--line2);background:var(--surface);color:var(--text);font-size:15px}
+.gfilter .chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}.chip.sel{cursor:pointer;user-select:none}.chip.sel.on{background:var(--me);color:#fff;border-color:transparent}
+.gl{padding:12px 0;border-bottom:1px solid var(--line)}.gl:last-of-type{border-bottom:0}
+/* 규칙 전후 분포 */
+.rhist{margin-top:10px}.rhist table{width:100%;border-collapse:collapse;margin-top:4px}.rhist th{text-align:left;font-weight:500;color:var(--text2);width:44px;font-size:12.5px}
+.rhist td{position:relative;height:20px;padding:2px 4px}.rhist td i{display:block;height:12px;border-radius:4px;background:var(--line2)}.rhist td i.a{background:var(--me)}.rhist td span{position:absolute;left:6px;top:1px;font-size:11px;color:var(--text2)}
+.cachenote{display:inline-block;margin-bottom:6px;padding:4px 10px;border-radius:999px;background:var(--surface2);border:1px solid var(--line2);color:var(--text2);font-size:12px}
 .tierrow .tg{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}   /* 엠블럼·티어·다음 티어는 한 덩어리로 줄바꿈 (줄 머리에 "·"만 남지 않게) */
 /* 집중 과제 아래 수 구간별 대실수율 */
 .bym{display:block;position:relative;padding-right:84px;color:var(--text);text-decoration:none}

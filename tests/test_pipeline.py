@@ -158,6 +158,10 @@ class WithDb(unittest.TestCase):
         self.assertEqual(len(S["rating_series"]), 24)
         self.assertEqual(len(S["log"]), 24)
         self.assertEqual(sum(sum(x["c"].values()) for x in S["log"]), S["coach"]["n"])     # 판별 기록의 실수 수는 유형 집계와 같다
+        self.assertTrue(all(set(("o", "cl", "e", "b", "gr", "a")) <= set(x) for x in S["log"]))   # 게임 탭 필터·검색 필드
+        co = S["coach"]
+        self.assertEqual(len(co["dates"]), 24)                                                  # 유형별 추세는 날짜 열을 한 번만 담는다
+        self.assertTrue(all("vals" in c["trend"] and "series" not in c["trend"] and len(c["trend"]["vals"]) == 24 for c in co["cats"]))
         self.assertEqual(S["tilt"]["sessions"]["n"], 4)
         self.assertEqual(S["tilt"]["sessions"]["max_len"], 6)
         for w in S["weaknesses"]:

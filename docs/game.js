@@ -8,6 +8,30 @@ const ID=params.get('id'); let G=null, IDX=0, FLIP=false, SHOW_BEST=true;
 /* 화살표 규칙: 초록 실선 = 지금 보이는 국면에서 둘 차례인 쪽의 엔진 추천 (차례와 항상 맞는다).
    주황 점선 = 내가 방금 둔 실수 대신 뒀어야 할 수 (내 부정확·실수·대실수·놓침에만, 상대의 수와 대단한·탁월한 수에는 없음). */
 const AMBER='#f5a524', FIX_CLS=new Set(['inacc','mist','blun','miss']);
+let PRE=false;   // 내 실수 뒤에서 '둔 수 전 국면' 을 보는 중 (화살표가 기물의 실제 자리에서 시작한다). 이동하면 꺼진다
+const isFix=(p)=>!!(p&&p.mine&&FIX_CLS.has(p.cls)&&p.best_uci&&p.best_uci!==p.uci);
+const mistakePlies=()=>G.plies.map((p,i)=>isFix(p)?i+1:0).filter(Boolean);
+/* 주석 달린 PGN: 수마다 시계·평가·분류, 내 실수에는 정답 수순을 변화수로 */
+function annotatedPGN(){
+  const NAG={blun:'??',mist:'?',inacc:'?!',brill:'!!',great:'!'}, NAME={blun:'대실수',mist:'실수',inacc:'부정확',miss:'외통 놓침',brill:'탁월한 수',great:'대단한 수',best:'최선',good:'좋음'};
+  const hdr=[['Event','Rapid'],['Site',G.url],['Date',G.date.replace(/-/g,'.')],['White',G.white],['Black',G.black],['Result',G.result],['WhiteElo',G.welo],['BlackElo',G.belo],['Opening',G.eco_name||''],['Termination',G.termination||''],['Annotator','chess-dashboard (Stockfish depth '+(G.depth||'')+')']];
+  const evs=(cp)=>cp==null?'':Math.abs(cp)>=9000?`#${cp>0?'':'-'}${Math.max(1,Math.round((10000-Math.abs(cp))/10))}`:(cp/100).toFixed(2);
+  const clkTxt=(c)=>c==null?'':`[%clk ${Math.floor(c/3600)}:${String(Math.floor(c%3600/60)).padStart(2,'0')}:${String(Math.floor(c%60)).padStart(2,'0')}]`;
+  const num=(p,first)=>p.mover==='w'?`${p.move}. `:(first?`${p.move}... `:'');
+  let out='', line=''; const push=(t)=>{ if(line.length+t.length>78){ out+=line.trimEnd()+'\n'; line=''; } line+=t; };
+  G.plies.forEach((p,i)=>{
+    push(num(p,i===0||G.plies[i-1].cls&&isFix(G.plies[i-1]))+p.san+(NAG[p.cls]||'')+' ');
+    const parts=[clkTxt(p.clock),`[%eval ${evs(p.cp_w)}]`]; if(p.cls&&p.cls!=='best'&&p.cls!=='good') parts.push(NAME[p.cls]||p.cls); if(isFix(p)) parts.push(`정답 ${p.best}`);
+    push(`{ ${parts.filter(Boolean).join(' ')} } `);
+    const L=G.lines[String(i+1)]; if(isFix(p)&&L&&L.best_line&&L.best_line.length){
+      push(`( ${L.best_line.map((s,j)=>{ const mv=p.move+Math.floor((j+(p.mover==='b'?1:0))/2), w=(p.mover==='w')===(j%2===0); return (w?`${mv}. `:(j===0?`${mv}... `:''))+s.san; }).join(' ')} ) `);
+    }
+  });
+  push(G.result);
+  return hdr.map(([k,v])=>`[${k} "${String(v).replace(/"/g,'\\"')}"]`).join('\n')+'\n\n'+out+line.trimEnd()+'\n';
+}
+window.__pgn=annotatedPGN;   // 점검(tests/ui_check.py)용
+function downloadPGN(){ const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([annotatedPGN()],{type:'application/x-chess-pgn'})); a.download=`${ID}.pgn`; a.click(); setTimeout(()=>URL.revokeObjectURL(a.href),2000); }
 let COACH=null;   // coach.json: 전체 기간의 집중 과제와 유형별 최근 빈도 (없어도 페이지는 동작한다)
 /* 둬 보기: 현재 국면(IDX)에서 아무 수나 둬 보고 브라우저 엔진(engine.js)의 평가를 본다.
    VAR = 둬 본 수 [{san, uci, fen}], VSEL = 고른 칸, VRES = 마지막 국면의 엔진 결과, VTHINK = 분석 중, VERR = 엔진 오류 문구 */
@@ -96,7 +120,9 @@ function renderMain(){
   const s=G.summary, n=G.plies.length;
   let h=`<div class="stick"><div class="boardwrap">${evalBarHTML('evalbar')}<div id="board" style="flex:1;min-width:0"></div></div>`;
   h+=`<div class="strip" id="strip">`+G.plies.map((p,i)=>`${p.mover==='w'?`<span class="num">${p.move}.</span>`:''}<span class="mv" data-jump="${i+1}"><i style="background:${CLSCOLOR[p.cls]}"></i>${esc(p.san)}</span>`).join('')+`</div>`;
-  h+=`<div class="vctl"><span class="btn nav" data-go="0">⏮</span><span class="btn nav" data-go="-1">‹</span><span class="btn nav" data-go="1">›</span><span class="btn nav" data-go="9">⏭</span></div></div>`;
+  h+=`<div class="vctl"><span class="btn nav" data-go="0">⏮</span><span class="btn nav" data-go="-1">‹</span><span class="btn nav" data-go="1">›</span><span class="btn nav" data-go="9">⏭</span></div>`;
+  const ms=mistakePlies();
+  h+=`<div class="vctl sub2"><span class="btn nav mnav" data-mgo="-1" title="이전 실수 ([ 키)">‹ 실수</span><span class="sub mcount">내 실수 ${ms.length}개</span><span class="btn nav mnav" data-mgo="1" title="다음 실수 (] 키)">실수 ›</span><span class="btn nav" id="pgn" title="수마다 시계·평가·분류와 정답 수순을 단 PGN">PGN</span></div></div>`;
   h+=`<div class="info card" id="info"></div>`;
   h+=lessonsHTML();
   h+=goodHTML();
@@ -186,10 +212,13 @@ function graphSVG(){
   return `<svg class="graph" id="graph" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><rect width="${W}" height="${H}" fill="#403d39"/><path d="${area}" fill="#f0f0f0"/><path d="M0 ${mid} L${W} ${mid}" stroke="#888" stroke-width=".5"/>${marks}<line id="gcur" x1="0" y1="0" x2="0" y2="${H}" stroke="#2a78d6" stroke-width="1.5"/></svg>`;
 }
 function draw(){
-  const n=G.plies.length; const inVar=VAR.length>0; const fen=inVar?VAR[VAR.length-1].fen:G.fens[IDX]; const p=IDX>0?G.plies[IDX-1]:null; const nx=IDX<n?G.plies[IDX]:null;
-  const arrows=[]; let last=p?[p.uci.slice(0,2),p.uci.slice(2,4)]:[];
+  const n=G.plies.length; const inVar=VAR.length>0; const p=IDX>0?G.plies[IDX-1]:null; const nx=IDX<n?G.plies[IDX]:null;
+  if(PRE&&(inVar||!isFix(p))) PRE=false;
+  const fen=inVar?VAR[VAR.length-1].fen:PRE?G.fens[IDX-1]:G.fens[IDX];
+  const arrows=[]; let last=p&&!PRE?[p.uci.slice(0,2),p.uci.slice(2,4)]:[];
   if(inVar){ const v=VAR[VAR.length-1]; last=[v.uci.slice(0,2),v.uci.slice(2,4)]; if(SHOW_BEST&&VRES&&VRES.best&&!VRES.over) arrows.push([VRES.best,GREEN]); }
-  else if(SHOW_BEST){ if(nx&&nx.best_uci) arrows.push([nx.best_uci,GREEN]); if(p&&p.mine&&FIX_CLS.has(p.cls)&&p.best_uci&&p.best_uci!==p.uci) arrows.push([p.best_uci,AMBER,true]); }
+  else if(PRE){ arrows.push([p.uci,RED]); arrows.push([p.best_uci,AMBER,true]); }   // 둔 수 전 국면: 빨강 = 실전에서 둔 수, 주황 점선 = 정답 (기물이 실제로 있는 칸에서)
+  else if(SHOW_BEST){ if(nx&&nx.best_uci) arrows.push([nx.best_uci,GREEN]); if(isFix(p)) arrows.push([p.best_uci,AMBER,true]); }
   if(VSEL) last=[VSEL];
   $('#board').innerHTML=boardSVG(fen,{flip:FLIP,arrows,last});
   if(VSEL){   // 고른 기물이 갈 수 있는 칸: 빈 칸은 점, 잡는 칸은 고리 (퍼즐과 같은 표시)
@@ -206,8 +235,8 @@ function draw(){
     info=`<div><span class="cls ${c[1]}">${c[0]}</span> <b>${mv(p)}</b> <span class="sub">(${who}) · 평가 ${ev(p.cp_before)} → ${ev(p.cp_after)}${p.wp_loss?` · 승률 −${p.wp_loss}%p`:''}</span></div>`;
     if(p.cls==='great'){ const prev=G.plies[IDX-2]; info+=`<div class="sub" style="margin-top:3px">${esc(GREAT_D)}${prev?` 상대의 ${esc(prev.san)} (${ev(-prev.cp_before)} → ${ev(p.cp_before)}) 를 응징했습니다.`:''}</div>`; }
     else if(p.cls==='brill'){ const L=G.lines[String(IDX)]||{}; info+=`<div class="sub" style="margin-top:3px">${esc(BRILL_D)}</div>`+(L.take?`<div style="margin-top:3px">${esc(L.take)} 로 잡으면 평가 <b>${ev(L.take_cp)}</b>${L.refutation&&L.refutation.length?` · 수순 <span class="mono">${esc(L.refutation.map(s=>s.san).join(' '))}</span>`:''}</div>`:''); }
-    else if(p.cls!=='best'&&p.cls!=='good'&&p.best) info+=p.mine?`<div style="margin-top:3px">정답은 <b class="mono">${esc(p.best)}</b>${SHOW_BEST?' <span class="sub">(주황 점선 화살표)</span>':''}</div>`:`<div class="sub" style="margin-top:3px">상대는 ${esc(p.best)} 가 더 나았습니다</div>`;
-    if(nx&&SHOW_BEST) info+=`<div class="sub" style="margin-top:3px">이 국면 엔진 추천: ${esc(nx.best)} (초록 화살표)</div>`;
+    else if(p.cls!=='best'&&p.cls!=='good'&&p.best) info+=p.mine?`<div style="margin-top:3px">정답은 <b class="mono">${esc(p.best)}</b>${SHOW_BEST?` <span class="sub">(${PRE?'주황 점선 · 빨강은 실전에서 둔 수':'주황 점선 화살표'})</span>`:''}${isFix(p)?` <span class="btn mini" id="pretoggle">${PRE?'둔 뒤 국면으로':'둔 수 전 국면 보기'}</span>`:''}</div>`:`<div class="sub" style="margin-top:3px">상대는 ${esc(p.best)} 가 더 나았습니다</div>`;
+    if(nx&&SHOW_BEST&&!PRE) info+=`<div class="sub" style="margin-top:3px">이 국면 엔진 추천: ${esc(nx.best)} (초록 화살표)</div>`;
     if(p.mine&&p.cat) info+=`<div style="margin-top:5px">${catTag(p.cat,COACH&&COACH.focus&&COACH.focus.includes(p.cat)?'rep':'')} <span class="sub">${esc(catOf(p.cat).d)}</span></div>`;
     info+=`<div class="sub" style="margin-top:3px">남은 시간 ${clk(p.clock)}${p.spent!=null?` · 이 수에 ${Math.round(p.spent)}초`:''}</div>`;
     const L=G.lines[String(IDX)];
@@ -224,7 +253,8 @@ function draw(){
   const cc=$('#ccur'); if(cc&&CLK){ const X=(CLK.L+IDX/CLK.n*CLK.pw).toFixed(1); cc.setAttribute('x1',X); cc.setAttribute('x2',X); }
   applyTheme();
 }
-function go(i){ IDX=Math.max(0,Math.min(G.plies.length,i)); clearVar(); draw(); }
+function go(i){ IDX=Math.max(0,Math.min(G.plies.length,i)); PRE=false; clearVar(); draw(); }
+function goMistake(dir){ const ms=mistakePlies(); if(!ms.length) return; const nx=dir>0?ms.find(x=>x>IDX):[...ms].reverse().find(x=>x<IDX); go(nx!=null?nx:(dir>0?ms[0]:ms[ms.length-1])); }
 document.addEventListener('click',(e)=>{   // 손을 뗄 때 처리한다: 누르는 순간 판을 다시 그리면 스와이프의 터치 끝 이벤트가 사라진다
   if(!G) return; const svg=e.target.closest('#board svg.board'); if(!svg) return;
   const sq=squareAt(svg,e,FLIP); if(!sq) return;
@@ -240,11 +270,14 @@ document.addEventListener('click',(e)=>{
   if(e.target.closest('#vundo')){ VAR.pop(); VSEL=null; VRES=null; if(VAR.length) think(); else { VTHINK=false; draw(); } return; }
   const j=e.target.closest('[data-jump]'); if(j){ go(+j.dataset.jump); return; }
   const nv=e.target.closest('[data-go]'); if(nv){ const g=+nv.dataset.go; go(g===0?0:g===9?G.plies.length:IDX+g); return; }
+  const mg=e.target.closest('[data-mgo]'); if(mg){ goMistake(+mg.dataset.mgo); return; }
+  if(e.target.closest('#pgn')){ downloadPGN(); return; }
+  if(e.target.closest('#pretoggle')){ PRE=!PRE; draw(); return; }
   if(e.target.closest('#optbest')){ SHOW_BEST=!SHOW_BEST; $('#optbest').classList.toggle('on',SHOW_BEST); draw(); return; }
   if(e.target.closest('#optflip')){ FLIP=!FLIP; $('#optflip').classList.toggle('on',FLIP!==(G.my_color==='b')); draw(); return; }
   const gr=e.target.closest('#graph'); if(gr){ const r=gr.getBoundingClientRect(); go(Math.round((e.clientX-r.left)/r.width*G.plies.length)); }
 });
-document.addEventListener('keydown',(e)=>{ if(!G) return; if(e.key==='ArrowLeft') go(IDX-1); else if(e.key==='ArrowRight') go(IDX+1); else if(e.key==='Home') go(0); else if(e.key==='End') go(G.plies.length); });
+document.addEventListener('keydown',(e)=>{ if(!G||(e.target.closest&&e.target.closest('input,textarea'))) return; if(e.key==='ArrowLeft') go(IDX-1); else if(e.key==='ArrowRight') go(IDX+1); else if(e.key==='Home') go(0); else if(e.key==='End') go(G.plies.length); else if(e.key==='[') goMistake(-1); else if(e.key===']') goMistake(1); });
 let tx=null; document.addEventListener('touchstart',e=>{ if(e.target.closest('.board')) tx=e.touches[0].clientX; },{passive:true});
 document.addEventListener('touchend',e=>{ if(tx==null) return; const dx=e.changedTouches[0].clientX-tx; tx=null; if(Math.abs(dx)>40) go(IDX+(dx<0?1:-1)); },{passive:true});
 load();
